@@ -1,0 +1,49 @@
+[package]
+name = "correctsound"
+version = "0.1.0"
+edition = "2024"
+description = "Room correction for Linux: measure speakers with a UMIK-1 and load the EQ into EasyEffects, in a terminal wizard"
+license = "MIT"
+repository = "https://github.com/arturzielazny/correctsound"
+homepage = "https://arturzielazny.github.io/correctsound/"
+readme = "README.md"
+keywords = ["audio", "room-correction", "pipewire", "easyeffects", "equalizer"]
+categories = ["multimedia::audio", "command-line-utilities"]
+
+[dependencies]
+anyhow = "1.0.104"
+chrono = "0.4.45"
+clap = { version = "4.6.7", features = ["derive"] }
+ab_glyph = "0.2.32"
+crossterm = "0.29.0"
+hound = "3.5.1"
+image = { version = "0.25.10", default-features = false }
+ratatui = "0.30.2"
+ratatui-image = { version = "11.1.0", default-features = false, features = ["crossterm"] }
+realfft = "3.5.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+signal-hook = "0.4.6"
+thiserror = "2.0.21"
+tiny-skia = "0.12.0"
+toml = "1.2.1"
+ureq = "3.5.2"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.test]
+opt-level = 2
+
+[dev-dependencies]
+# PNG output for examples/screenshots.rs only.
+image = { version = "0.25.10", default-features = false, features = ["png"] }
