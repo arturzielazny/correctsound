@@ -67,12 +67,14 @@ fn simple_lines() -> Vec<Line<'static>> {
            verify the result.",
         ),
         gap(),
-        h("Placement (p on the measure step)"),
+        h("Placement and room treatment (p on the measure step)"),
         p(
-            "Short bass sweeps repeat every couple of seconds while you move the speakers, your \
-           seat or the mic. Each one is drawn as it arrives, with a number for how uneven the \
-           bass is (lower is better). Pin a placement with Space, try another, keep the \
-           better one, then measure. It is the only cure for the deep dips EQ cannot fill.",
+            "Short bass sweeps repeat every couple of seconds while you move the speakers or \
+           your seat, or carry a bass trap from corner to corner. Each one is drawn as it \
+           arrives, with a number for how uneven the bass is (lower is better). Pin the room \
+           as it is with Space, try a change, keep what helps, then measure. Keep the mic \
+           where it is, and keep still while a sweep plays. It is the only cure for the deep \
+           dips EQ cannot fill.",
         ),
         gap(),
         h("Decay (w)"),

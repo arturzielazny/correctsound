@@ -44,10 +44,12 @@ correctsound
 
 More screens:
 
-- `p` **Placement** (measure step): short bass sweeps repeat every couple of seconds while you
-  move the speakers, your seat or the mic. Each is drawn as it arrives, with an evenness score;
-  pin one with Space and compare. Below about 200 Hz the room decides what you hear, and this
-  is the only cure for the dips no EQ can fill.
+- `p` **Placement and room treatment** (measure step): short bass sweeps repeat every couple
+  of seconds, each drawn as it arrives with an evenness score. **Walk around with a bass trap
+  and see what it does right away**: pin the room as it is with Space, put the trap in a
+  corner, and the next sweep shows the difference. The same works for moving the speakers or
+  your seat. Below about 200 Hz the room decides what you hear, and this is the only cure for
+  the dips no EQ can fill.
 - `w` **Decay**: a waterfall of the bass, how each note fades after the sound stops, and the
   notes that ring longest.
 - `c` **Curiosities**: the room's resonances and the room dimensions they suggest,

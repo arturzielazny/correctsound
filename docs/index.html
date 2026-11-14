@@ -117,6 +117,19 @@ svg text { font-family: var(--sans); }
 .note.blue { border-color: var(--accent); background: rgba(125,207,255,.06); }
 .note.green { border-color: var(--green); background: rgba(158,206,106,.06); }
 
+/* room treatment highlight */
+.spot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; width: fit-content; max-width: 100%; margin: 22px 0 0; padding: 10px 16px; border-radius: 12px; background: rgba(158,206,106,.08); border: 1px solid rgba(158,206,106,.35); color: var(--fg); }
+.spot .tag { font: 700 .72rem/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--bg); background: var(--green); padding: 5px 8px; border-radius: 6px; }
+.feature { margin-top: 18px; display: grid; grid-template-columns: auto 1fr auto; gap: 22px; align-items: center; background: linear-gradient(90deg, rgba(158,206,106,.10), rgba(125,207,255,.05)); border: 1px solid rgba(158,206,106,.35); border-radius: var(--radius); padding: 22px 26px; }
+.feature h3 { margin: 0 0 6px; }
+.feature p { margin: 0; }
+@media (max-width: 760px) { .feature { grid-template-columns: 1fr; } }
+.treat-lede { font-size: 1.3rem; color: var(--fg); font-weight: 600; max-width: 820px; margin: 6px 0 0; }
+.treat-lede em { font-style: normal; color: var(--green); }
+ol.howto { counter-reset: h; list-style: none; padding: 0; margin: 18px 0 0; display: grid; gap: 12px; }
+ol.howto li { counter-increment: h; position: relative; padding-left: 42px; }
+ol.howto li::before { content: counter(h); position: absolute; left: 0; top: 0; width: 28px; height: 28px; border-radius: 8px; background: var(--green); color: var(--bg); font: 700 .85rem/28px var(--mono); text-align: center; }
+
 /* playgrounds */
 .play { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; }
 .controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 14px; }
@@ -167,6 +180,7 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
     <div class="links">
       <a href="#how">How it works</a>
       <a href="#tour">Tour</a>
+      <a href="#treatment">Room treatment</a>
       <a href="#science">The science</a>
       <a href="#yours">Make it yours</a>
       <a class="gh" href="https://github.com/arturzielazny/correctsound">GitHub</a>
@@ -184,6 +198,7 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
       <a class="btn" href="#tour">Take the tour</a>
       <a class="btn" href="#yours">Make it yours with your AI agent</a>
     </div>
+    <a class="spot" href="#treatment" style="text-decoration:none"><span class="tag">Room treatment</span><span>Carry a bass trap from corner to corner and <b>watch the bass change every two seconds</b>.</span><span style="color:var(--green)">How →</span></a>
     <div class="install"><span class="prompt">$</span> cargo install --git https://github.com/arturzielazny/correctsound &amp;&amp; correctsound --simulate</div>
     <figure class="shot">
       <div class="bar"><i></i><i></i><i></i></div>
@@ -214,6 +229,14 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
         <h3>Verifies the result</h3>
         <p>Loads the preset into EasyEffects, sets it to load automatically, then plays the sweeps again through it and compares with what it predicted.</p>
       </div>
+    </div>
+    <div class="feature">
+      <div class="icon" style="background:rgba(158,206,106,.16);width:46px;height:46px;border-radius:12px;display:grid;place-items:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9ece6a" stroke-width="2" stroke-linejoin="round"><path d="M3 3h18v18H3z" opacity=".45"/><path d="M3 3l8 0-8 8z" fill="rgba(158,206,106,.35)"/><path d="M14 17c1.5-4 3-4 4.5 0"/></svg></div>
+      <div>
+        <h3>Guides room treatment, live</h3>
+        <p>EQ can't fix everything in the bass; the room can. Live placement re-measures every couple of seconds while you move a bass trap, a speaker or your chair, so you see what each change does before you commit to it.</p>
+      </div>
+      <a class="btn" href="#treatment">See it</a>
     </div>
   </div>
 </section>
@@ -396,13 +419,80 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
     <h2>Below 200 Hz, the room is in charge</h2>
     <p class="lede">In the bass, sound waves are as long as the room. They bounce between the walls, pile up into resonances that boom, and cancel where a reflection arrives out of step. Two tools help with what EQ can't fix.</p>
 
-    <div class="two" style="margin-top:34px">
-      <div>
-        <h3 style="margin-top:0">Live placement <kbd>p</kbd></h3>
-        <p>Short bass sweeps repeat every couple of seconds while you move the speakers, your seat or the mic. Each one is drawn as it arrives, with a single number for how uneven the bass is. Pin a placement with <kbd>Space</kbd>, try another, keep the better one.</p>
-        <p>Here the simulated speakers were 40 cm from the wall behind them (dashed): its reflection cancels a band around 170 Hz. Moved to 60 cm, the dip shrinks and the score improves by 1.1 dB. No equalizer can do that.</p>
+    <div id="treatment" style="scroll-margin-top:80px;margin-top:40px">
+      <h3 style="margin:0">Live placement and room treatment <kbd>p</kbd></h3>
+      <p class="treat-lede">Walk around with a bass trap and <em>see what it does right away</em>.</p>
+      <p>Short bass sweeps repeat every two to three seconds, and each one is drawn as it arrives with one number for how uneven the bass is. Whatever changes the bass shows up on the next sweep: a bass trap in a corner, a speaker 10 cm further from the wall, your chair moved forward. Pin one state with <kbd>Space</kbd> and compare everything else against it. Room treatment stops being guesswork and becomes a few minutes of trying.</p>
+
+      <div class="diagram two" style="margin-bottom:8px;gap:20px">
+        <svg viewBox="10 0 440 372" role="img" aria-label="Top view of a room: the mic stays at the seat while a bass trap is tried in each corner">
+          <defs>
+            <marker id="tarrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#9ece6a"/></marker>
+          </defs>
+          <text x="30" y="26" fill="#c0caf5" font-size="15" font-weight="600">Your room, from above</text>
+          <rect x="30" y="40" width="400" height="300" rx="4" fill="#1a1b26" stroke="#565f89" stroke-width="2"/>
+          <!-- sound paths -->
+          <path d="M145 82L230 214M325 82L230 214" stroke="#7aa2f7" stroke-width="1.5" stroke-dasharray="3 5" opacity=".6"/>
+          <!-- speakers -->
+          <rect x="130" y="58" width="30" height="24" rx="4" fill="#7aa2f7"/>
+          <rect x="310" y="58" width="30" height="24" rx="4" fill="#7aa2f7"/>
+          <text x="230" y="75" fill="#a9b1d6" font-size="13" text-anchor="middle">speakers</text>
+          <!-- seat and mic -->
+          <circle cx="230" cy="232" r="17" fill="#24283b" stroke="#a9b1d6" stroke-width="1.5"/>
+          <circle cx="230" cy="214" r="5.5" fill="#7dcfff"/>
+          <text x="230" y="272" fill="#a9b1d6" font-size="13" text-anchor="middle">the mic stays at your seat</text>
+          <!-- traps: the current one, and the corners still to try -->
+          <path d="M31 41H96L31 106z" fill="rgba(158,206,106,.5)" stroke="#9ece6a" stroke-width="2"/>
+          <text x="40" y="126" fill="#9ece6a" font-size="13" font-weight="600">bass trap</text>
+          <path d="M429 41H364L429 106z" fill="none" stroke="#9ece6a" stroke-width="1.5" stroke-dasharray="5 4" opacity=".75"/>
+          <path d="M31 339H96L31 274z" fill="none" stroke="#9ece6a" stroke-width="1.5" stroke-dasharray="5 4" opacity=".75"/>
+          <path d="M429 339H364L429 274z" fill="none" stroke="#9ece6a" stroke-width="1.5" stroke-dasharray="5 4" opacity=".75"/>
+          <path d="M105 140Q230 175 352 122" fill="none" stroke="#9ece6a" stroke-width="1.8" stroke-dasharray="6 5" marker-end="url(#tarrow)"/>
+          <path d="M60 150Q52 215 60 262" fill="none" stroke="#9ece6a" stroke-width="1.8" stroke-dasharray="6 5" marker-end="url(#tarrow)"/>
+          <text x="230" y="178" fill="#9ece6a" font-size="13" text-anchor="middle">try each corner, then wait for the next sweep</text>
+
+        </svg>
+        <svg viewBox="480 0 420 372" role="img" aria-label="The bass response with the trap in the corner compared with the pinned response without it: the peak at 45 Hz drops">
+          <defs>
+            <marker id="tarrow2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#9ece6a"/></marker>
+          </defs>
+          <!-- the screen -->
+          <text x="490" y="26" fill="#c0caf5" font-size="15" font-weight="600">What the screen shows, two seconds later</text>
+          <rect x="490" y="40" width="400" height="260" rx="4" fill="#1a1b26" stroke="#2f3549"/>
+          <path d="M604 40V300M690 40V300M776 40V300" stroke="#2f3549"/>
+          <path d="M490 105H890M490 170H890M490 235H890" stroke="#2f3549"/>
+          <polyline fill="none" stroke="#a9b1d6" stroke-width="2" stroke-dasharray="6 5" stroke-linejoin="round" points="490,236 520,206 548,176 566,140 580,104 591,86 602,104 616,138 634,166 660,176 684,200 702,248 718,198 746,166 776,176 810,160 850,172 890,165"/>
+          <polyline fill="none" stroke="#9ece6a" stroke-width="2.6" stroke-linejoin="round" points="490,236 520,206 548,180 566,160 580,146 591,140 602,146 616,158 634,170 660,176 684,196 702,226 718,192 746,168 776,174 810,162 850,171 890,166"/>
+          <path d="M591 92V132" stroke="#9ece6a" stroke-width="1.6" marker-end="url(#tarrow2)"/>
+          <text x="604" y="98" fill="#9ece6a" font-size="13">the boom at 45 Hz drops</text>
+          <text x="880" y="62" fill="#9ece6a" font-size="13" text-anchor="end" font-family="JetBrains Mono, monospace">now: 2.3 dB more even than pinned</text>
+          <g fill="#737aa2" font-size="12" text-anchor="middle"><text x="494" y="318">20</text><text x="604" y="318">50</text><text x="690" y="318">100</text><text x="776" y="318">200</text><text x="896" y="318" text-anchor="end">500 Hz</text></g>
+          <path d="M500 352h34" stroke="#a9b1d6" stroke-width="2" stroke-dasharray="6 5"/>
+          <text x="542" y="356" fill="#a9b1d6" font-size="13">pinned: no trap</text>
+          <path d="M680 352h34" stroke="#9ece6a" stroke-width="2.6"/>
+          <text x="722" y="356" fill="#a9b1d6" font-size="13">now: trap in the corner</text>
+        </svg>
       </div>
-      <figure class="shot zoom"><div class="bar"><i></i><i></i><i></i></div><img loading="lazy" src="img/5b-placement.png" alt="Placement screen comparing the bass at two speaker positions"></figure>
+      <figcaption>An illustration of the idea. The real screen draws the same two curves, measured, with a score above them.</figcaption>
+
+      <div class="two" style="margin-top:40px;align-items:start">
+        <div>
+          <h3 style="margin-top:0">Treating a room with it</h3>
+          <ol class="howto">
+            <li>Put the mic on its stand at your seat. It stays there the whole time. On the measure step, press <kbd>p</kbd>.</li>
+            <li>Let a few sweeps run with the room as it is, then press <kbd>Space</kbd> to pin that curve. It is what everything else is compared with.</li>
+            <li>Put the bass trap in a corner and step back. Keep still and quiet while the next sweep plays (about a second and a half); footsteps show up as noise.</li>
+            <li>Read the result: the live curve against the pinned one, and how many dB more or less even it is. Try the next corner, the wall behind the speakers, behind your seat, or two traps stacked.</li>
+            <li>Leave the trap where it helped most. Then run the normal measurement, so the EQ corrects what is left.</li>
+          </ol>
+          <p style="margin-top:16px"><kbd>Tab</kbd> switches speakers, and <kbd>s</kbd> pauses the sweeps while you carry something heavy.</p>
+          <div class="note green">The same loop works for anything that moves: speakers closer to or further from the wall, the desk, your chair. And it is honest about what doesn't help: thin foam panels barely touch the bass, and the chart shows that before you buy more of them.</div>
+        </div>
+        <div>
+          <figure class="shot zoom"><div class="bar"><i></i><i></i><i></i></div><img loading="lazy" src="img/5b-placement.png" alt="Placement screen comparing the bass at two speaker positions"></figure>
+          <figcaption>The real screen, on the simulator. The simulated speakers were pinned 40 cm from the wall behind them (dashed): its reflection cancels a band around 170 Hz. Moved to 60 cm, the dip shrinks and the score improves by 1.1 dB. No equalizer can do that.</figcaption>
+        </div>
+      </div>
     </div>
 
     <div class="two" style="margin-top:54px">
@@ -658,7 +748,7 @@ and how you would test it on the simulator. Wait for my go-ahead before writing 
       <a class="zoom" href="img/5a-sweeping.png"><img loading="lazy" src="img/5a-sweeping.png" alt="Sweep in progress"><span>A sweep in progress</span></a>
       <a class="zoom" href="img/5-measured.png"><img loading="lazy" src="img/5-measured.png" alt="Measured responses"><span>Both speakers measured</span></a>
       <a class="zoom" href="img/6-result.png"><img loading="lazy" src="img/6-result.png" alt="Result"><span>Result and equalizer</span></a>
-      <a class="zoom" href="img/5b-placement.png"><img loading="lazy" src="img/5b-placement.png" alt="Placement"><span>Live placement</span></a>
+      <a class="zoom" href="img/5b-placement.png"><img loading="lazy" src="img/5b-placement.png" alt="Placement"><span>Live placement and room treatment</span></a>
       <a class="zoom" href="img/6c-decay.png"><img loading="lazy" src="img/6c-decay.png" alt="Decay waterfall"><span>Decay waterfall</span></a>
       <a class="zoom" href="img/6b-curiosities.png"><img loading="lazy" src="img/6b-curiosities.png" alt="Curiosities"><span>Curiosities</span></a>
       <a class="zoom" href="img/6d-info.png"><img loading="lazy" src="img/6d-info.png" alt="How it works"><span>How it works (<kbd>i</kbd>)</span></a>
@@ -685,7 +775,7 @@ correctsound review          # open the newest again, re-analysed, nothing playe
       <tr><th>Key</th><th>Where</th><th>Does</th></tr>
       <tr><td><kbd>Enter</kbd></td><td>everywhere</td><td>the screen's main action</td></tr>
       <tr><td><kbd>a</kbd></td><td>measure / save</td><td>add a mic position / apply in EasyEffects</td></tr>
-      <tr><td><kbd>p</kbd></td><td>measure</td><td>live placement</td></tr>
+      <tr><td><kbd>p</kbd></td><td>measure</td><td>live placement and room treatment</td></tr>
       <tr><td><kbd>t</kbd> <kbd>h</kbd> <kbd>f</kbd> <kbd>d</kbd></td><td>result</td><td>tilt, high limit, filter count, back to automatic</td></tr>
       <tr><td><kbd>v</kbd></td><td>save</td><td>verify through EasyEffects</td></tr>
       <tr><td><kbd>c</kbd> <kbd>w</kbd> <kbd>i</kbd></td><td>after measuring</td><td>curiosities, decay waterfall, how it works</td></tr>

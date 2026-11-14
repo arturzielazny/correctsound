@@ -647,8 +647,9 @@ fn placement(
         Layout::vertical([Constraint::Length(9), Constraint::Min(8)]).areas(area);
     let mut lines = vec![
         Line::from(
-            "Short bass sweeps repeat while you move the speakers, your seat or the mic by 10–50 cm. \
-             Below 200 Hz the room decides what you hear: placement can fix dips no EQ can.",
+            "Short bass sweeps repeat while you move the speakers or your seat by 10–50 cm, or try a \
+             bass trap in each corner. Below 200 Hz the room decides what you hear: placement and \
+             treatment fix what no EQ can.",
         ),
         Line::from(
             "Pin a placement with Space, try another, keep the one with the smaller number. Lower \
