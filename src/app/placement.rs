@@ -100,6 +100,9 @@ pub struct PlacementState {
     pub latest: Option<Reading>,
     /// A pinned reading to compare against.
     pub reference: Option<Reading>,
+    /// The latest bass response of each speaker (by [`Channel::index`]), so the chart can
+    /// keep one scale for both.
+    pub last: [Option<Response>; 2],
     /// Sweeps analysed since the screen opened.
     pub count: usize,
     pub issue: Option<String>,
@@ -133,6 +136,7 @@ impl PlacementState {
             paused: false,
             latest: None,
             reference: None,
+            last: [None, None],
             count: 0,
             issue: None,
             sweep,
@@ -208,6 +212,7 @@ impl PlacementState {
                 for (d, &f) in r.db.iter_mut().zip(&r.freqs) {
                     *d = scale.spl(*d + dbfs) - cal.db_at(f);
                 }
+                self.last[self.channel.index()] = Some(r.clone());
                 self.latest = Some(Reading {
                     channel: self.channel,
                     score: Score::of(&r),

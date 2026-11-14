@@ -222,26 +222,6 @@ pub fn draw(
     );
 }
 
-/// Curves on the bass span (20–500 Hz), the dB range fitted to them.
-pub fn draw_bass(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    title: &str,
-    curves: &[Curve],
-    gfx: &mut Graphics,
-) {
-    draw_axes(
-        frame,
-        area,
-        title,
-        curves,
-        &[],
-        BASS,
-        y_range(curves, BASS),
-        gfx,
-    );
-}
-
 /// [`draw`] with a given dB range. Curves with an empty label stay out of the legend.
 pub fn draw_with_range(
     frame: &mut Frame<'_>,
@@ -517,7 +497,8 @@ fn grid_steps(lo: f64, hi: f64) -> (f64, f64) {
 }
 
 /// A y range covering the curves within `x`, ignoring the extremes, at least 40 dB tall.
-fn y_range(curves: &[Curve], x: HzRange) -> (f64, f64) {
+#[must_use]
+pub fn y_range(curves: &[Curve], x: HzRange) -> (f64, f64) {
     let mut values: Vec<f64> = curves
         .iter()
         .flat_map(|c| c.points.iter())

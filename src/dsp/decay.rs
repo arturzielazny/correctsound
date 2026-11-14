@@ -124,10 +124,22 @@ impl Waterfall {
         })
     }
 
+    /// The loudest point of the first slice, as power.
+    #[must_use]
+    pub fn peak(&self) -> f64 {
+        self.power[0].iter().copied().fold(0.0, f64::max)
+    }
+
     /// Slice `k` in dB relative to the loudest point of the first slice.
     #[must_use]
     pub fn slice_db(&self, k: usize) -> Response {
-        let top = self.power[0].iter().copied().fold(0.0, f64::max);
+        self.slice_db_from(k, self.peak())
+    }
+
+    /// Slice `k` in dB relative to the power `top`, so that waterfalls measured the same way
+    /// (both speakers) share one scale.
+    #[must_use]
+    pub fn slice_db_from(&self, k: usize, top: f64) -> Response {
         Response {
             freqs: self.freqs.clone(),
             db: self.power[k]

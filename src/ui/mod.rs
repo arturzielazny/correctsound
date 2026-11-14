@@ -735,7 +735,24 @@ fn placement(
         };
         curves.push(Curve::new("now", series, &r.response.freqs, &r.response.db));
     }
-    plot::draw_bass(frame, plot_area, "Bass at the mic, dB SPL", &curves, gfx);
+    // The scale also covers the other speaker's latest sweep, so Tab keeps it.
+    let mut scaled: Vec<Curve> = p
+        .last
+        .iter()
+        .flatten()
+        .map(|r| Curve::new("", Series::Reference, &r.freqs, &r.db))
+        .collect();
+    scaled.extend(curves.iter().cloned());
+    plot::draw_axes(
+        frame,
+        plot_area,
+        "Bass at the mic, dB SPL",
+        &curves,
+        &[],
+        plot::BASS,
+        plot::y_range(&scaled, plot::BASS),
+        gfx,
+    );
 }
 
 /// The decay view: the waterfall of the shown channel and the notes that ring longest.
@@ -752,7 +769,14 @@ fn decay(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Graphics) {
     };
     let [chart, side] =
         Layout::horizontal([Constraint::Min(40), Constraint::Length(40)]).areas(area);
-    let slices: Vec<Vec<f64>> = (0..w.power.len()).map(|k| w.slice_db(k).db).collect();
+    // Both speakers against the louder one's start, so Tab keeps the scale.
+    let top = (0..2)
+        .filter_map(|ch| app.waterfall(ch))
+        .map(|w| w.peak())
+        .fold(0.0, f64::max);
+    let slices: Vec<Vec<f64>> = (0..w.power.len())
+        .map(|k| w.slice_db_from(k, top).db)
+        .collect();
     let ringing = w.ringing(30.0);
     let marks: Vec<f64> = ringing.iter().take(4).map(|r| r.hz).collect();
     plot::draw_decay(
@@ -837,15 +861,25 @@ fn result(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Graphics) {
         from_hz: ch.target.low_hz,
         to_hz: ch.target.high_hz,
     };
-    plot::draw(
+    plot::draw_with_range(
         frame,
         plot_area,
         &format!("{name} channel (Tab to switch)"),
         &curves,
         &[shade],
+        both_channels_range(app, false),
         gfx,
     );
-    let (eq_curves, range) = filter_curves(&ch.filters, design.eq.trim_db[c] + design.eq.preamp_db);
+    let eq_curves_of = |c: usize| {
+        filter_curves(
+            &design.channels[c].filters,
+            design.eq.trim_db[c] + design.eq.preamp_db,
+        )
+    };
+    let (eq_curves, range) = eq_curves_of(c);
+    // The other channel's range too, so Tab keeps the scale.
+    let other = eq_curves_of(1 - c).1;
+    let range = (range.0.min(other.0), range.1.max(other.1));
     plot::draw_with_range(
         frame,
         eq_area,
@@ -1086,10 +1120,21 @@ fn save(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Graphics) {
     );
     let [l, r] =
         Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(plots);
+    let range = both_channels_range(app, true);
     for (c, area) in [(0, l), (1, r)] {
         let name = if c == 0 { "Left" } else { "Right" };
-        plot::draw(frame, area, name, &channel_curves(app, c, true), &[], gfx);
+        let curves = channel_curves(app, c, true);
+        plot::draw_with_range(frame, area, name, &curves, &[], range, gfx);
     }
+}
+
+/// One dB range for both channels' result charts, so switching or comparing them keeps
+/// the scale.
+fn both_channels_range(app: &App, with_verify: bool) -> (f64, f64) {
+    let curves: Vec<Curve> = (0..2)
+        .flat_map(|c| channel_curves(app, c, with_verify))
+        .collect();
+    plot::y_range(&curves, plot::FULL)
 }
 
 /// Verification summary: overall match, then any single spot that differs a lot.
