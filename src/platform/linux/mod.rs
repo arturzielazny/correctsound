@@ -1,0 +1,224 @@
+//! Linux: PipeWire for audio and devices (`pw-cat`, `pw-dump`, `wpctl`), ALSA for the
+//! mic's capture control (`amixer`), and EasyEffects as the EQ host.
+
+pub mod alsa;
+pub mod easyeffects;
+pub mod pipewire;
+pub mod pw_cat;
+
+use std::path::Path;
+use std::process::{Command, Stdio};
+
+use anyhow::{Context, Result, bail};
+
+use super::{Applied, Device, Devices, EqHost, GainSetting, InputGain, Routing, System};
+use crate::audio::{AudioBackend, Route};
+use crate::eq::EqSet;
+
+/// EasyEffects' virtual sink: where playback goes to pass through the EQ.
+pub const EASYEFFECTS_SINK: &str = "easyeffects_sink";
+
+/// Runs a command and returns its stdout.
+///
+/// # Errors
+///
+/// Fails if the program is missing or exits unsuccessfully.
+pub fn run(prog: &str, args: &[&str]) -> Result<String> {
+    let out = Command::new(prog)
+        .args(args)
+        .stdin(Stdio::null())
+        .output()
+        .with_context(|| format!("running {prog} (is it installed?)"))?;
+    if !out.status.success() {
+        bail!(
+            "{prog} {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// The real Linux system.
+#[derive(Debug, Default)]
+pub struct Linux;
+
+impl Linux {
+    fn pipewire_volume(sink: &Device) -> Result<(f64, bool)> {
+        pipewire::volume(&sink.id)
+    }
+}
+
+impl System for Linux {
+    fn name(&self) -> &'static str {
+        "Linux (PipeWire, ALSA, EasyEffects)"
+    }
+
+    fn missing(&self) -> Vec<String> {
+        let tools = [
+            ("pw-dump", "pipewire"),
+            ("pw-cat", "pipewire"),
+            ("wpctl", "wireplumber"),
+            ("amixer", "alsa-utils"),
+        ];
+        tools
+            .iter()
+            .filter(|(t, _)| {
+                Command::new("sh")
+                    .args(["-c", &format!("command -v {t}")])
+                    .stdout(Stdio::null())
+                    .status()
+                    .map_or(true, |s| !s.success())
+            })
+            .map(|(t, p)| format!("{t} (package: {p})"))
+            .collect()
+    }
+
+    fn devices(&mut self) -> Result<Devices> {
+        let dump = pipewire::Dump::load()?;
+        let mut devices = dump.devices();
+        devices.eq_host = Some(EqHost {
+            name: "EasyEffects".into(),
+            running: dump.easyeffects_running(),
+        });
+        devices.preferred_sink = dump
+            .easyeffects_output()
+            .or_else(easyeffects::configured_output_device)
+            .filter(|n| devices.sinks.iter().any(|s| &s.name == n))
+            .or_else(|| {
+                dump.default_sink()
+                    .filter(|n| devices.sinks.iter().any(|s| &s.name == n))
+            })
+            .or_else(|| devices.sinks.first().map(|s| s.name.clone()));
+        Ok(devices)
+    }
+
+    fn find_input(&mut self, name: &str) -> Result<Option<Device>> {
+        let dump = pipewire::Dump::load()?;
+        Ok(Some(Device {
+            id: dump.node_id(name).unwrap_or(0).to_string(),
+            name: name.to_owned(),
+            description: name.to_owned(),
+            stereo: false,
+        }))
+    }
+
+    fn input_gain(&mut self, mic: &Device) -> Result<InputGain> {
+        let (volume, muted) = pipewire::volume(&mic.id)?;
+        let mut settings = vec![GainSetting {
+            label: "PipeWire input volume".into(),
+            value: format!("{volume:.2}{}", if muted { " (muted)" } else { "" }),
+            at_unity: (volume - 1.0).abs() < 1e-3 && !muted,
+        }];
+        let card = pipewire::Dump::load()
+            .ok()
+            .and_then(|d| d.alsa_card(&mic.name));
+        let control = match &card {
+            Some(card) => alsa::capture_control(card)?,
+            None => None,
+        };
+        settings.push(match control {
+            Some(a) => GainSetting {
+                label: "ALSA capture control".into(),
+                value: format!(
+                    "{}/{}{}",
+                    a.value,
+                    a.max,
+                    if a.switch_on { "" } else { " (switched off)" }
+                ),
+                at_unity: a.value == a.max && a.switch_on,
+            },
+            None => GainSetting {
+                label: "ALSA capture control".into(),
+                value: "none".into(),
+                at_unity: true,
+            },
+        });
+        Ok(InputGain { settings })
+    }
+
+    fn set_input_unity(&mut self, mic: &Device) -> Result<()> {
+        let (volume, muted) = pipewire::volume(&mic.id)?;
+        let id = mic.id.as_str();
+        let vol = format!("{volume:.4}");
+        crate::restore::register_command("mic-volume", &["wpctl", "set-volume", id, &vol]);
+        let mute = if muted { "1" } else { "0" };
+        crate::restore::register_command("mic-mute", &["wpctl", "set-mute", id, mute]);
+        run("wpctl", &["set-volume", id, "1.0"])?;
+        run("wpctl", &["set-mute", id, "0"])?;
+        if let Some(card) = pipewire::Dump::load()?.alsa_card(&mic.name)
+            && let Some(ctl) = alsa::capture_control(&card)?
+        {
+            alsa::set_unity(&card, &ctl)?;
+        }
+        Ok(())
+    }
+
+    fn input_gain_help(&self) -> &'static str {
+        "check it with wpctl and alsamixer"
+    }
+
+    fn output_volume(&mut self, sink: &Device) -> Result<f64> {
+        Ok(Self::pipewire_volume(sink)?.0)
+    }
+
+    fn set_output_volume(&mut self, sink: &Device, volume: f64) -> Result<()> {
+        let id = sink.id.as_str();
+        let current = Self::pipewire_volume(sink)?.0;
+        crate::restore::register_command(
+            &format!("sink-volume-{id}"),
+            &["wpctl", "set-volume", id, &format!("{current:.4}")],
+        );
+        run(
+            "wpctl",
+            &["set-volume", id, &format!("{:.4}", volume.clamp(0.0, 1.5))],
+        )?;
+        Ok(())
+    }
+
+    fn eq_bypass(&mut self) -> Result<Option<bool>> {
+        easyeffects::bypass()
+    }
+
+    fn set_eq_bypass(&mut self, bypass: bool) -> Result<()> {
+        if let Some(current) = easyeffects::bypass()? {
+            let arg = if current { "1" } else { "2" };
+            crate::restore::register_command("easyeffects-bypass", &["easyeffects", "-b", arg]);
+        }
+        easyeffects::set_bypass(bypass)
+    }
+
+    fn audio(&mut self, mic: &Device, sink: &Device) -> Box<dyn AudioBackend> {
+        Box::new(pw_cat::PwCat::new(&mic.name, &sink.name))
+    }
+
+    fn check_routing(&mut self, route: Route, sink: &Device) -> Result<Routing> {
+        let expected = match route {
+            Route::Hardware => sink.name.as_str(),
+            Route::ThroughEq => EASYEFFECTS_SINK,
+        };
+        let links = pipewire::Dump::load()?.links_from(pw_cat::PLAYBACK_NODE);
+        Ok(if links.is_empty() {
+            Routing::Pending
+        } else if links.iter().all(|l| l == expected) {
+            Routing::Ok
+        } else {
+            Routing::Wrong(format!(
+                "the sweep was routed to {} instead of {expected} (check EasyEffects' settings)",
+                links.join(", ")
+            ))
+        })
+    }
+
+    fn apply_eq(&mut self, eq: &EqSet, backup_parent: &Path, sink: &Device) -> Result<Applied> {
+        let target = pipewire::Dump::load()
+            .ok()
+            .and_then(|d| d.route_description(&sink.name))
+            .map(|route| easyeffects::AutoloadTarget {
+                device: sink.name.clone(),
+                description: sink.description.clone(),
+                route,
+            });
+        easyeffects::apply(eq, backup_parent, target.as_ref())
+    }
+}

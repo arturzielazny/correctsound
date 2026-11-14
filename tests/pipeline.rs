@@ -175,7 +175,7 @@ fn verification_matches_prediction() {
         &DesignOptions::default(),
     );
     state.lock().expect("lock").eq = Some(d.eq.clone());
-    let verified = measure_all(&config, &state, Route::EasyEffects);
+    let verified = measure_all(&config, &state, Route::ThroughEq);
     for (c, (ch, v)) in d.channels.iter().zip(&verified).enumerate() {
         let v = &v.fit;
         for ((&f, &p), &m) in ch.predicted.freqs.iter().zip(&ch.predicted.db).zip(&v.db) {

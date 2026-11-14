@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 
-use super::{AudioBackend, Program, Route, Source, Stream};
+use crate::audio::{AudioBackend, Route, Source, Stream};
 use crate::dsp::SAMPLE_RATE;
 
 /// Node name of the playback stream, used to check where it is linked.
@@ -141,12 +141,12 @@ impl AudioBackend for PwCat {
         let (tx, rx) = mpsc::channel();
         spawn_capture(&self.mic, &children, tx)?;
 
-        if !matches!(source.program, Program::Silence) {
+        if !source.is_silent() {
             // Let the capture stream start first so the pre-roll is recorded.
             thread::sleep(Duration::from_millis(200));
             let target = match route {
                 Route::Hardware => self.sink.as_str(),
-                Route::EasyEffects => "easyeffects_sink",
+                Route::ThroughEq => super::EASYEFFECTS_SINK,
             };
             let mut child = match pw_cat("--playback", target, 2, PLAYBACK_NODE)
                 .stdin(Stdio::piped())

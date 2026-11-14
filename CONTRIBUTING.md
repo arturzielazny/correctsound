@@ -13,9 +13,12 @@ Then send a pull request. Someone else has your setup too.
   (`src/audio/sim.rs`). Work against the simulator first: it plays nothing, and its true
   response is known, so tests can check results exactly.
 - `correctsound --simulate` is the app on the simulator.
-- Start with the module docs: `src/lib.rs` lists the modules. Each file starts with a comment
-  saying what it is for.
+- Start with [AGENTS.md](AGENTS.md): how the code is laid out, how to add a platform, and the
+  rules. Each file starts with a comment saying what it is for.
 - [IDEAS.md](IDEAS.md) lists what is planned, with the reasoning.
+- **One app for every system.** A port adds a module under `src/platform/`; it never
+  rewrites the app so it only works on one OS. CI tests every change on Linux, macOS and
+  Windows.
 
 ## A preamble for every prompt
 
@@ -23,17 +26,19 @@ Agents do better with the ground rules up front. Paste this before any of the pr
 
 ```text
 You are working on CorrectSound, a Rust TUI that measures speakers with a measurement mic
-and generates room-correction EQ. Read README.md, CONTRIBUTING.md and IDEAS.md, then the
-module docs (src/lib.rs and the first comment of each file). Run `cargo test` before changing
-anything, and keep it passing.
+and generates room-correction EQ. Read AGENTS.md first, then README.md, CONTRIBUTING.md and
+IDEAS.md, and the module docs (the first comment of each file). Run `cargo test` before
+changing anything, and keep it passing.
 
 Rules:
+- This is one app for every operating system. Extend it; never rewrite it so it only works
+  on mine. Everything OS-specific goes in its own module under src/platform/, behind the
+  System and AudioBackend traits. Do not break or remove other platforms' code, and keep
+  the rest of the code OS-neutral. CI must pass on Linux, macOS and Windows.
 - Never play sound on my real speakers without asking me first and waiting for my answer.
   Use the simulator (src/audio/sim.rs, `--simulate`) for development and tests.
 - Back up any settings file of another program before overwriting it, and restore what you
   change when the app exits (see src/restore.rs).
-- Keep the DSP (src/dsp, src/eq) independent of the platform; put platform code behind the
-  existing traits (AudioBackend in src/audio, System in src/system).
 - Add tests for new behaviour, preferably end-to-end against the simulator, like
   tests/pipeline.rs and tests/wizard.rs.
 - Run `cargo fmt` and `cargo clippy --all-targets -- -D warnings` before you finish.
@@ -44,24 +49,26 @@ Rules:
 ### macOS
 
 ```text
-Port CorrectSound to macOS. Audio: add an AudioBackend that plays and records through
-CoreAudio (the `cpal` crate is fine), at 48 kHz, routing playback to the device the user
-picks and recording from the UMIK-1. System: replace the PipeWire/wpctl/amixer parts with
-macOS equivalents (device list, input volume at unity, output volume), behind the System
-trait. Output: keep left.txt/right.txt (Equalizer APO format), and add an exporter for
-<the EQ app I use: eqMac / SoundSource / Rogue Amoeba Audio Hijack / none>. Keep Linux
-working. Show me the plan before you write code.
+Add macOS as a platform, following "Adding a platform" in AGENTS.md: a new module
+src/platform/macos/ selected in platform::native(), with no changes to how Linux works.
+Audio: an AudioBackend that plays and records through CoreAudio (the `cpal` crate is fine)
+at 48 kHz, to the output the user picks and from the UMIK-1. System: device list, input
+volume at unity, output volume, through CoreAudio. EQ host: <CamillaDSP with BlackHole /
+eqMac / SoundSource / none, files only>; read the macOS notes in IDEAS.md. If the shared
+code needs something new, add a neutral method to the System trait and implement it for
+Linux and the simulator too. Show me the plan before you write code.
 ```
 
 ### Windows
 
 ```text
-Port CorrectSound to Windows. Use WASAPI (via `cpal`) for playback and capture at 48 kHz,
-in exclusive mode if shared mode resamples. Replace the PipeWire/EasyEffects parts with
-Equalizer APO: write the filters to an include file under Equalizer APO's config directory
-and add one `Include:` line to config.txt (back up config.txt first; restore it on request).
-Detect whether Equalizer APO is installed on the chosen device and explain how to install it
-if not. Keep Linux working. Show me the plan before you write code.
+Add Windows as a platform, following "Adding a platform" in AGENTS.md: a new module
+src/platform/windows/ selected in platform::native(), with no changes to how Linux works.
+Use WASAPI (via `cpal`) for playback and capture at 48 kHz, in exclusive mode if shared
+mode resamples. EQ host: Equalizer APO. Write the filters to an include file under its
+config directory and add one `Include:` line to config.txt (back up config.txt first,
+register the undo). Detect whether Equalizer APO is installed on the chosen device and
+explain how to install it if not. Show me the plan before you write code.
 ```
 
 ### Another measurement mic
@@ -90,7 +97,7 @@ without sound.
 ```text
 I don't use EasyEffects. Add an output for <CamillaDSP / a PipeWire filter-chain module>:
 generate its configuration from the EqSet (src/eq), install and load it the way
-src/system/easyeffects.rs does for EasyEffects (back up, apply, autoload, restore), and let
+src/platform/linux/easyeffects.rs does for EasyEffects (back up, apply, autoload, restore), and let
 the user pick the output in step 1 when both are available. Verification (the `v` key) must
 measure through the new path.
 ```

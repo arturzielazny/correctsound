@@ -122,12 +122,12 @@ impl SimConfig {
     }
 }
 
-/// Mutable simulated system state shared with [`crate::system::sim`].
+/// Mutable simulated system state shared with [`crate::platform::sim`].
 #[derive(Debug, Clone)]
 pub struct SimState {
-    /// Sink volume on the wpctl (cubic) scale.
+    /// Output volume, 1.0 being unity (on Linux, wpctl's cubic scale).
     pub sink_volume: f64,
-    /// EQ loaded into simulated EasyEffects, applied to [`Route::EasyEffects`] playback.
+    /// EQ loaded into the simulated EQ host, applied to [`Route::ThroughEq`] playback.
     pub eq: Option<EqSet>,
     /// Distance from the speakers to the wall behind them, m, once the placement screen
     /// has moved them; its bass reflection cancels around a quarter wavelength.
@@ -224,7 +224,7 @@ impl Chain {
         let room = &config.rooms[channel.index()];
         let st = state.lock().expect("sim state lock poisoned").clone();
         let (eq, eq_gain) = match (&st.eq, route) {
-            (Some(set), Route::EasyEffects) => (
+            (Some(set), Route::ThroughEq) => (
                 set.channels[channel.index()]
                     .iter()
                     .map(|f| Biquad::peaking(RATE, f.freq, f.gain, f.q))

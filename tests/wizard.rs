@@ -59,10 +59,10 @@ fn full_wizard_on_simulator() {
 
     press(&mut app, KeyCode::Enter);
     assert_eq!(app.step, Step::MicGain, "{:?}", app.message);
-    assert!(!app.mic_gain.expect("gain read").is_unity());
+    assert!(!app.mic_gain.as_ref().expect("gain read").is_unity());
     assert!(render(&app).contains("set these to unity"));
     press(&mut app, KeyCode::Enter);
-    assert!(app.mic_gain.expect("gain read").is_unity());
+    assert!(app.mic_gain.as_ref().expect("gain read").is_unity());
     press(&mut app, KeyCode::Enter);
     assert_eq!(app.step, Step::Level);
 

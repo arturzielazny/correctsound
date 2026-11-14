@@ -40,8 +40,8 @@ fn simple_lines() -> Vec<Line<'static>> {
         gap(),
         h("The steps"),
         p(
-            "1 Devices: finds the mic and the output EasyEffects plays to. EasyEffects is paused \
-           while measuring, so the bare speakers are measured.",
+            "1 Devices: finds the mic and the output your EQ program (EasyEffects on Linux) plays \
+           to. The EQ program is paused while measuring, so the bare speakers are measured.",
         ),
         p(
             "2 Calibration: every UMIK-1 is slightly different; its own correction file, from \
@@ -62,9 +62,9 @@ fn simple_lines() -> Vec<Line<'static>> {
            which ones keep helping at mic positions they were not fitted to.",
         ),
         p(
-            "7 Save: writes the files, loads them into EasyEffects as a preset (it also loads \
-           automatically from then on), and can play the sweeps again through EasyEffects to \
-           verify the result.",
+            "7 Save: writes the files, loads them into the EQ program as a preset (it also loads \
+           automatically from then on), and can play the sweeps again through it to verify the \
+           result.",
         ),
         gap(),
         h("Placement and room treatment (p on the measure step)"),
@@ -111,8 +111,8 @@ fn technical_lines() -> Vec<Line<'static>> {
         gap(),
         h("Signal path"),
         p(
-            "Playback and capture are pw-cat subprocesses at 48 kHz, 32-bit float. Both streams \
-           set node.dont-move so EasyEffects cannot reroute them; the playback stream's links \
+            "On Linux, playback and capture are pw-cat subprocesses at 48 kHz, 32-bit float. Both \
+           streams set node.dont-move so EasyEffects cannot reroute them; the playback stream's links \
            are checked during every sweep. EasyEffects is bypassed for measuring and the \
            original state is restored on exit, on signals, and if the terminal closes.",
         ),
@@ -198,7 +198,7 @@ fn technical_lines() -> Vec<Line<'static>> {
         gap(),
         h("Verification"),
         p(
-            "The sweeps play again into the EasyEffects sink. The result is compared with the \
+            "The sweeps play again through the EQ program (EasyEffects' sink on Linux). The result is compared with the \
            prediction in the corrected range after removing the broadband offset (preamp, sink \
            volume): RMS of the difference, and the largest single deviation.",
         ),

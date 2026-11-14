@@ -3,7 +3,8 @@
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 
-use super::{Devices, Node, run};
+use super::run;
+use crate::platform::{Device, Devices};
 
 /// USB vendor:product of the UMIK-1 as ALSA reports it.
 const UMIK1_COMPONENTS: &str = "USB2752:0007";
@@ -59,26 +60,31 @@ impl Dump {
         self.0.iter().filter(|o| is_node(o))
     }
 
-    fn node(o: &Value) -> Option<Node> {
-        let positions = prop(o, "audio.position")
+    fn node(o: &Value) -> Option<Device> {
+        let positions: Vec<&str> = prop(o, "audio.position")
             .map(|p| {
                 p.trim_matches(|c| c == '[' || c == ']')
                     .split(|c: char| c == ',' || c.is_whitespace())
                     .filter(|s| !s.is_empty())
-                    .map(str::to_owned)
                     .collect()
             })
             .unwrap_or_default();
-        Some(Node {
-            id: u32::try_from(o.get("id")?.as_u64()?).ok()?,
+        Some(Device {
+            id: o.get("id")?.as_u64()?.to_string(),
             name: prop(o, "node.name")?.to_owned(),
             description: prop(o, "node.description")
                 .or_else(|| prop(o, "node.nick"))
                 .unwrap_or_default()
                 .to_owned(),
-            positions,
-            alsa_card: prop_text(o, "alsa.card").or_else(|| prop_text(o, "api.alsa.pcm.card")),
+            stereo: positions.contains(&"FL") && positions.contains(&"FR"),
         })
+    }
+
+    /// The ALSA card number behind the node called `name`, for its mixer controls.
+    #[must_use]
+    pub fn alsa_card(&self, name: &str) -> Option<String> {
+        let o = self.nodes().find(|o| prop(o, "node.name") == Some(name))?;
+        prop_text(o, "alsa.card").or_else(|| prop_text(o, "api.alsa.pcm.card"))
     }
 
     fn name_of(&self, id: u64) -> Option<&str> {
@@ -89,7 +95,7 @@ impl Dump {
 
     /// The UMIK-1 source, if plugged in.
     #[must_use]
-    pub fn mic(&self) -> Option<Node> {
+    pub fn mic(&self) -> Option<Device> {
         let sources = || {
             self.nodes()
                 .filter(|o| prop(o, "media.class") == Some("Audio/Source"))
@@ -140,7 +146,7 @@ impl Dump {
 
     /// Hardware sinks (excludes EasyEffects and other virtual sinks).
     #[must_use]
-    pub fn hardware_sinks(&self) -> Vec<Node> {
+    pub fn hardware_sinks(&self) -> Vec<Device> {
         self.nodes()
             .filter(|o| prop(o, "media.class") == Some("Audio/Sink"))
             .filter(|o| prop(o, "device.api").is_some() || prop(o, "api.alsa.path").is_some())
@@ -236,7 +242,7 @@ impl Dump {
         out
     }
 
-    /// Everything preflight needs, except the preferred sink.
+    /// Everything preflight needs, except the preferred sink and the EQ host.
     #[must_use]
     pub fn devices(&self) -> Devices {
         Devices {
@@ -244,7 +250,7 @@ impl Dump {
             sinks: self.hardware_sinks(),
             preferred_sink: None,
             other_streams: self.other_streams(),
-            easyeffects_running: self.easyeffects_running(),
+            eq_host: None,
         }
     }
 }
@@ -254,8 +260,8 @@ impl Dump {
 /// # Errors
 ///
 /// Fails if wpctl fails or prints something unexpected.
-pub fn volume(id: u32) -> Result<(f64, bool)> {
-    let out = run("wpctl", &["get-volume", &id.to_string()])?;
+pub fn volume(id: &str) -> Result<(f64, bool)> {
+    let out = run("wpctl", &["get-volume", id])?;
     parse_volume(&out).with_context(|| format!("unexpected wpctl output: {out:?}"))
 }
 
@@ -269,7 +275,7 @@ fn parse_volume(out: &str) -> Option<(f64, bool)> {
 mod tests {
     use super::*;
 
-    const DUMP: &str = include_str!("../../tests/data/pw-dump.json");
+    const DUMP: &str = include_str!("../../../tests/data/pw-dump.json");
 
     #[test]
     fn finds_devices_in_real_dump() {
@@ -279,7 +285,7 @@ mod tests {
             mic.name,
             "alsa_input.usb-miniDSP_Ltd._UMIK-1_1-00.mono-fallback"
         );
-        assert_eq!(mic.alsa_card.as_deref(), Some("3"));
+        assert_eq!(d.alsa_card(&mic.name).as_deref(), Some("3"));
         let sinks = d.hardware_sinks();
         assert!(
             sinks
@@ -287,7 +293,8 @@ mod tests {
                 .any(|s| s.name == "alsa_output.pci-0000_c1_00.1.HiFi__HDMI4__sink")
         );
         assert!(sinks.iter().all(|s| s.name != "easyeffects_sink"));
-        assert!(sinks.iter().all(Node::is_stereo_capable));
+        assert!(sinks.iter().all(|s| s.stereo));
+        assert!(!mic.stereo);
         assert!(d.easyeffects_running());
         assert_eq!(
             d.easyeffects_output().as_deref(),

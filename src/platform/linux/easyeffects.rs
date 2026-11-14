@@ -7,10 +7,10 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 
-use super::Applied;
 use crate::eq::EqSet;
 use crate::eq::export::easyeffects_preset;
 use crate::paths::{easyeffects_config_dir, easyeffects_data_dir};
+use crate::platform::Applied;
 
 /// Installed presets are named `CoSo-<sequence>-<DDMMYYYY>`, e.g. `CoSo-007-13112026`.
 pub const PRESET_PREFIX: &str = "CoSo";

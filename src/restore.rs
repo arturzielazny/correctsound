@@ -1,63 +1,46 @@
-//! Process-wide list of commands that put the system back as it was.
+//! Process-wide list of steps that put the system back as it was.
 //!
-//! Every change the app makes to the system (EasyEffects bypass, mic gain, sink
-//! volume) registers its undo command here first. [`run_all`] runs them in reverse
-//! order and is called on normal exit, on error, from the panic hook and on SIGTERM.
+//! Every change the app makes to the system (EQ host bypass, mic gain, output volume)
+//! registers its undo step here first. [`run_all`] runs them in reverse order and is
+//! called on normal exit, on error, from the panic hook and on signals. A step is a
+//! closure, so a platform can undo through an API as well as with a command
+//! ([`register_command`]).
 
 use std::process::{Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
-/// An undo step: a program and its arguments.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Undo {
+/// An undo step.
+struct Undo {
     /// Identifies the setting, so a later change does not register a second undo.
-    pub key: String,
-    pub argv: Vec<String>,
+    key: String,
+    action: Box<dyn FnOnce() + Send>,
 }
 
 static UNDO: Mutex<Vec<Undo>> = Mutex::new(Vec::new());
 
-/// Registers `argv` as the undo for `key`, unless `key` already has one.
-pub fn register(key: &str, argv: &[&str]) {
-    let mut list = UNDO
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+/// The list, recovered from poisoning: this runs from the panic hook too.
+fn list() -> MutexGuard<'static, Vec<Undo>> {
+    UNDO.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Registers `action` as the undo for `key`, unless `key` already has one. The action
+/// runs on the way out, so it must not panic; errors should be ignored.
+pub fn register(key: &str, action: impl FnOnce() + Send + 'static) {
+    let mut list = list();
     if list.iter().any(|u| u.key == key) {
         return;
     }
     list.push(Undo {
         key: key.to_owned(),
-        argv: argv.iter().map(|s| (*s).to_owned()).collect(),
+        action: Box::new(action),
     });
 }
 
-/// Forgets the undo for `key` (the setting was restored some other way).
-pub fn forget(key: &str) {
-    let mut list = UNDO
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    list.retain(|u| u.key != key);
-}
-
-/// Pending undo steps, for display.
-#[must_use]
-pub fn pending() -> Vec<Undo> {
-    UNDO.lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .clone()
-}
-
-/// Runs every undo step in reverse order and clears the list. Errors are ignored:
-/// this runs on the way out and must not fail.
-pub fn run_all() {
-    // Recover from poisoning: this runs from the panic hook too.
-    let steps = std::mem::take(
-        &mut *UNDO
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner),
-    );
-    for step in steps.iter().rev() {
-        if let Some((prog, args)) = step.argv.split_first() {
+/// Registers running `argv` (a program and its arguments) as the undo for `key`.
+pub fn register_command(key: &str, argv: &[&str]) {
+    let argv: Vec<String> = argv.iter().map(|s| (*s).to_owned()).collect();
+    register(key, move || {
+        if let Some((prog, args)) = argv.split_first() {
             let _ = Command::new(prog)
                 .args(args)
                 .stdin(Stdio::null())
@@ -65,5 +48,24 @@ pub fn run_all() {
                 .stderr(Stdio::null())
                 .status();
         }
+    });
+}
+
+/// Forgets the undo for `key` (the setting was restored some other way).
+pub fn forget(key: &str) {
+    list().retain(|u| u.key != key);
+}
+
+/// Keys of the pending undo steps, for display.
+#[must_use]
+pub fn pending() -> Vec<String> {
+    list().iter().map(|u| u.key.clone()).collect()
+}
+
+/// Runs every undo step in reverse order and clears the list.
+pub fn run_all() {
+    let steps = std::mem::take(&mut *list());
+    for step in steps.into_iter().rev() {
+        (step.action)();
     }
 }

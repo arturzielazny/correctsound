@@ -1,4 +1,6 @@
-//! XDG locations used by the app.
+//! Where the app keeps its files: the XDG locations, on every platform (under the home
+//! directory when the XDG variables are unset), so a session's layout is the same
+//! everywhere.
 
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -21,7 +23,7 @@ pub fn tilde(path: &std::path::Path) -> String {
 }
 
 fn home() -> PathBuf {
-    std::env::var_os("HOME").map_or_else(|| PathBuf::from("."), PathBuf::from)
+    std::env::home_dir().unwrap_or_else(|| PathBuf::from("."))
 }
 
 fn xdg(var: &str, fallback: &str) -> PathBuf {

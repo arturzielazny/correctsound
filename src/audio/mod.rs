@@ -1,6 +1,8 @@
 //! Audio I/O: a playback source played on one channel while the mic is recorded.
+//!
+//! [`AudioBackend`] is implemented per platform (see [`crate::platform`]) and by the
+//! simulator in [`sim`].
 
-pub mod pipewire;
 pub mod sim;
 
 use std::sync::Arc;
@@ -48,10 +50,10 @@ impl Channel {
 /// Where playback is sent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Route {
-    /// Straight to the hardware sink, bypassing EasyEffects.
+    /// Straight to the output, bypassing the EQ host.
     Hardware,
-    /// Through `easyeffects_sink`, so the loaded EQ applies (verification only).
-    EasyEffects,
+    /// Through the EQ host, so the loaded EQ applies (verification only).
+    ThroughEq,
 }
 
 /// What to play.
@@ -94,6 +96,12 @@ impl Source {
             Program::Once { signal, pre, post } => Some(pre + signal.len() + post),
             _ => None,
         }
+    }
+
+    /// True when there is nothing to play (record only).
+    #[must_use]
+    pub fn is_silent(&self) -> bool {
+        matches!(self.program, Program::Silence)
     }
 
     /// True once a `Once` program has played everything including the trailing silence.

@@ -6,13 +6,12 @@ use std::time::{Duration, Instant};
 use anyhow::{Result, anyhow};
 
 use crate::analysis::{Responses, responses};
-use crate::audio::pipewire::PLAYBACK_NODE;
 use crate::audio::{AudioBackend, Channel, Program, Route, Source, Stream};
 use crate::cal::Calibration;
 use crate::dsp::SAMPLE_RATE;
 use crate::dsp::level::SplScale;
 use crate::dsp::sweep::{IrWindow, Sweep, SweepAnalysis, SweepIssue, SweepParams};
-use crate::system::System;
+use crate::platform::{Device, Routing, System};
 
 /// Silence recorded before the sweep, used as the noise-floor estimate.
 const PRE_ROLL: usize = SAMPLE_RATE as usize / 2;
@@ -37,7 +36,7 @@ impl Purpose {
     fn route(self) -> Route {
         match self {
             Self::Measure => Route::Hardware,
-            Self::Verify => Route::EasyEffects,
+            Self::Verify => Route::ThroughEq,
         }
     }
 }
@@ -167,39 +166,34 @@ impl MeasureState {
         Ok(())
     }
 
-    /// Collects audio, checks routing, and reports a finished recording.
-    pub fn tick(&mut self, system: &mut dyn System, check_links: bool, sink: &str) -> Tick {
+    /// Collects audio, checks routing (where `sink` is given), and reports a finished
+    /// recording.
+    pub fn tick(&mut self, system: &mut dyn System, sink: Option<&Device>) -> Tick {
         let Some(run) = &mut self.run else {
             return Tick::Idle;
         };
         run.recording.extend(run.stream.drain());
         let elapsed = run.started.elapsed();
-        if check_links && !run.links_ok && elapsed > LINK_CHECK_AFTER {
-            let expected = match self.purpose {
-                Purpose::Measure => sink,
-                Purpose::Verify => "easyeffects_sink",
+        if let Some(sink) = sink
+            && !run.links_ok
+            && elapsed > LINK_CHECK_AFTER
+        {
+            let route = self.purpose.route();
+            let problem = match system.check_routing(route, sink) {
+                Ok(Routing::Ok) => {
+                    run.links_ok = true;
+                    None
+                }
+                Ok(Routing::Pending) if elapsed < LINK_CHECK_GIVE_UP => None,
+                Ok(Routing::Pending) => Some(anyhow!(
+                    "the sweep did not reach any output; nothing was measured. Try again"
+                )),
+                Ok(Routing::Wrong(why)) => Some(anyhow!("{why}; nothing was measured. Try again")),
+                Err(e) => Some(e),
             };
-            match system.playback_links(PLAYBACK_NODE) {
-                Ok(links) if links.iter().all(|l| l == expected) && !links.is_empty() => {
-                    run.links_ok = true
-                }
-                Ok(links) if links.is_empty() && elapsed < LINK_CHECK_GIVE_UP => {}
-                Ok(links) => {
-                    let to = if links.is_empty() {
-                        "nothing".to_owned()
-                    } else {
-                        links.join(", ")
-                    };
-                    self.fail(anyhow!(
-                        "the sweep was routed to {to} instead of {expected}; nothing was measured. \
-                         Check EasyEffects' settings and try again"
-                    ));
-                    return Tick::Failed;
-                }
-                Err(e) => {
-                    self.fail(e);
-                    return Tick::Failed;
-                }
+            if let Some(e) = problem {
+                self.fail(e);
+                return Tick::Failed;
             }
         }
         if run.stream.is_finished() && run.finished_at.is_none() {

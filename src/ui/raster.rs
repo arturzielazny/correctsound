@@ -15,15 +15,37 @@ const LABEL_SHARE: f32 = 0.9;
 /// when the font loads; JetBrains Mono's otherwise.
 static HEIGHT_PER_ADVANCE: OnceLock<f32> = OnceLock::new();
 
-/// Loads the system monospace font (`fc-match monospace`), the terminal's usual font.
-#[must_use]
-pub fn load_font() -> Option<FontVec> {
-    let out = std::process::Command::new("fc-match")
+/// Monospace fonts to try where fontconfig is missing (macOS, Windows), first found wins.
+const FALLBACK_FONTS: [&str; 4] = [
+    "/System/Library/Fonts/SFNSMono.ttf",
+    "/System/Library/Fonts/Menlo.ttc",
+    "C:\\Windows\\Fonts\\CascadiaMono.ttf",
+    "C:\\Windows\\Fonts\\consola.ttf",
+];
+
+/// The system monospace font's file: `fc-match monospace` (the terminal's usual font),
+/// else a platform's standard one.
+fn font_path() -> Option<std::path::PathBuf> {
+    let from_fontconfig = std::process::Command::new("fc-match")
         .args(["-f", "%{file}", "monospace"])
         .output()
-        .ok()?;
-    let path = String::from_utf8(out.stdout).ok()?;
-    let font = FontVec::try_from_vec(std::fs::read(path.trim()).ok()?).ok()?;
+        .ok()
+        .and_then(|out| String::from_utf8(out.stdout).ok())
+        .map(|p| std::path::PathBuf::from(p.trim()))
+        .filter(|p| p.is_file());
+    from_fontconfig.or_else(|| {
+        FALLBACK_FONTS
+            .iter()
+            .map(std::path::PathBuf::from)
+            .find(|p| p.is_file())
+    })
+}
+
+/// Loads the system monospace font for chart labels.
+#[must_use]
+pub fn load_font() -> Option<FontVec> {
+    // Index 0 also reads the first font of a collection (.ttc).
+    let font = FontVec::try_from_vec_and_index(std::fs::read(font_path()?).ok()?, 0).ok()?;
     let advance = font.h_advance_unscaled(font.glyph_id('0'));
     if advance > 0.0 {
         let _ = HEIGHT_PER_ADVANCE.set(font.height_unscaled() / advance);

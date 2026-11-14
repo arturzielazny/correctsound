@@ -198,7 +198,7 @@ fn step_hints(app: &App) -> &'static str {
         }
         Step::Save if app.measure.running() => "s stop",
         Step::Save if app.save.applied.is_some() => "v verify   Enter/q quit   Esc back",
-        Step::Save => "a apply in EasyEffects   Enter/q quit   Esc back",
+        Step::Save => "a apply the EQ   Enter/q quit   Esc back",
     }
 }
 
@@ -254,14 +254,18 @@ fn preflight(frame: &mut Frame<'_>, area: Rect, app: &App) {
         ))),
     }
     if let Some(d) = &app.devices {
-        if d.easyeffects_running {
-            lines.push(Line::from(ok(
-                "EasyEffects is running; it will be bypassed while measuring and restored afterwards",
-            )));
-        } else {
-            lines.push(Line::from(warn(
-                "EasyEffects is not running; EQ files will still be written",
-            )));
+        match &d.eq_host {
+            Some(h) if h.running => lines.push(Line::from(ok(&format!(
+                "{} is running; it will be bypassed while measuring and restored afterwards",
+                h.name
+            )))),
+            Some(h) => lines.push(Line::from(warn(&format!(
+                "{} is not running; EQ files will still be written",
+                h.name
+            )))),
+            None => lines.push(Line::from(warn(
+                "No EQ program is supported here yet; EQ files will be written",
+            ))),
         }
         if !d.other_streams.is_empty() {
             lines.push(Line::from(warn(&format!(
@@ -285,7 +289,10 @@ fn preflight(frame: &mut Frame<'_>, area: Rect, app: &App) {
                 .map(|s| {
                     let mut label = s.description.clone();
                     if d.preferred_sink.as_deref() == Some(s.name.as_str()) {
-                        label.push_str("  (EasyEffects output)");
+                        match &d.eq_host {
+                            Some(h) => label.push_str(&format!("  ({} output)", h.name)),
+                            None => label.push_str("  (default)"),
+                        }
                     }
                     ListItem::new(label)
                 })
@@ -372,33 +379,13 @@ fn mic_gain(frame: &mut Frame<'_>, area: Rect, app: &App) {
     match &app.mic_gain {
         None => lines.push(Line::from(warn("Reading mic gain…"))),
         Some(g) => {
-            let pw = format!(
-                "PipeWire input volume {:.2}{}",
-                g.pw_volume,
-                if g.pw_muted { " (muted)" } else { "" }
-            );
-            lines.push(Line::from(
-                if (g.pw_volume - 1.0).abs() < 1e-3 && !g.pw_muted {
-                    ok(&pw)
+            for setting in &g.settings {
+                let text = format!("{} {}", setting.label, setting.value);
+                lines.push(Line::from(if setting.at_unity {
+                    ok(&text)
                 } else {
-                    bad(&pw)
-                },
-            ));
-            match g.alsa {
-                Some(a) => {
-                    let text = format!(
-                        "ALSA capture control {}/{}{}",
-                        a.value,
-                        a.max,
-                        if a.switch_on { "" } else { " (switched off)" }
-                    );
-                    lines.push(Line::from(if a.value == a.max && a.switch_on {
-                        ok(&text)
-                    } else {
-                        bad(&text)
-                    }));
-                }
-                None => lines.push(Line::from(Span::raw("  No ALSA capture control"))),
+                    bad(&text)
+                }));
             }
             lines.push(Line::from(""));
             if g.is_unity() {
@@ -996,7 +983,7 @@ fn channel_curves(app: &App, c: usize, with_verify: bool) -> Vec<Curve> {
         Curve::new("predicted", Series::Predicted, &display.freqs, &predicted),
     ];
     if with_verify && let Some(v) = &app.verify_responses()[c] {
-        // Align broadband level with the prediction (the EasyEffects sink has its own volume).
+        // Align broadband level with the prediction (the EQ host's output has its own volume).
         let offset = mean_diff(&predicted, &v.display.db, &display.freqs, &target);
         let shifted: Vec<f64> = v.display.db.iter().map(|d| d + offset).collect();
         curves.push(Curve::new(
@@ -1073,23 +1060,25 @@ fn save(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Graphics) {
         lines.push(Line::from(ok(&format!("Saved {}", names.join(", ")))));
         lines.push(Line::from(format!("    in {}", crate::paths::tilde(&dir))));
         lines.push(Line::from(
-            "    left.txt / right.txt are Equalizer APO files; CorrectSound.json is an EasyEffects preset.",
+            "    left.txt / right.txt are Equalizer APO files; CorrectSound.json is an EasyEffects preset; report.txt lists the filters.",
         ));
     }
     lines.push(Line::from(""));
+    let host = app.eq_host_name();
     match (&s.applied, app.can_apply()) {
         (Some(a), _) => {
             lines.push(Line::from(ok(&format!(
-                "Loaded preset \"{}\" in EasyEffects; previous settings backed up to the session's easyeffects-backup/",
-                a.preset_name
+                "Loaded preset \"{}\" in {host}; its previous settings are backed up in {}",
+                a.preset_name,
+                crate::paths::tilde(&a.backup_dir)
             ))));
             lines.push(Line::from(match &a.autoload {
                 Some(route) => ok(&format!(
-                    "EasyEffects will load it automatically for {route}, also after a restart"
+                    "{host} will load it automatically for {route}, also after a restart"
                 )),
-                None => warn(
-                    "Could not set it to load automatically: set it in EasyEffects (Presets → Autoload)",
-                ),
+                None => warn(&format!(
+                    "Could not set it to load automatically: set that in {host}'s settings"
+                )),
             }));
             match (&s.verify, app.measure.progress()) {
                 (_, Some((ch, p))) => lines.push(Line::from(format!(
@@ -1097,18 +1086,18 @@ fn save(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Graphics) {
                     ch.name().to_lowercase(),
                     p * 100.0
                 ))),
-                (Some(v), None) => verify_lines(v, &mut lines),
-                (None, None) => lines.push(Line::from(
-                    "Press v to verify: the sweeps play again, this time through EasyEffects. Don't move the mic.",
-                )),
+                (Some(v), None) => verify_lines(v, host, &mut lines),
+                (None, None) => lines.push(Line::from(format!(
+                    "Press v to verify: the sweeps play again, this time through {host}. Don't move the mic."
+                ))),
             }
         }
-        (None, true) => lines.push(Line::from(
-            "Press a to install the preset in EasyEffects and load it (current settings are backed up first).",
-        )),
-        (None, false) => lines.push(Line::from(
-            "EasyEffects is not running: import left.txt / right.txt in its Equalizer (split channels) by hand.",
-        )),
+        (None, true) => lines.push(Line::from(format!(
+            "Press a to install the preset in {host} and load it (its current settings are backed up first)."
+        ))),
+        (None, false) => lines.push(Line::from(format!(
+            "{host} is not running: load left.txt / right.txt into its equalizer by hand, one per channel."
+        ))),
     }
     if let Some(issue) = &app.measure.issue {
         lines.push(Line::from(bad(issue)));
@@ -1139,7 +1128,7 @@ fn both_channels_range(app: &App, with_verify: bool) -> (f64, f64) {
 }
 
 /// Verification summary: overall match, then any single spot that differs a lot.
-fn verify_lines(v: &[VerifyResult; 2], lines: &mut Vec<Line<'static>>) {
+fn verify_lines(v: &[VerifyResult; 2], host: &str, lines: &mut Vec<Line<'static>>) {
     let text = format!(
         "Verification: the result matches the prediction within {:.1} dB RMS (L) / {:.1} dB RMS (R)",
         v[0].rms_db, v[1].rms_db
@@ -1148,7 +1137,7 @@ fn verify_lines(v: &[VerifyResult; 2], lines: &mut Vec<Line<'static>>) {
         lines.push(Line::from(ok(&text)));
     } else {
         lines.push(Line::from(warn(&format!(
-            "{text}. That is more than expected: check that EasyEffects has no other effects \
+            "{text}. That is more than expected: check that {host} has no other effects \
              active, and that the mic has not moved."
         ))));
     }

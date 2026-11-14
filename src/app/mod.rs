@@ -20,7 +20,7 @@ pub use measure::{MeasureState, Purpose};
 pub use placement::PlacementState;
 
 use crate::analysis::Responses;
-use crate::audio::sim::{SimBackend, SimConfig, SimState};
+use crate::audio::sim::{SimConfig, SimState};
 use crate::audio::{AudioBackend, Channel};
 use crate::cal::{self, Calibration, Orientation, Serial};
 use crate::config::Config;
@@ -28,8 +28,8 @@ use crate::dsp::level::SplScale;
 use crate::eq::export;
 use crate::eq::fit::{Design, design_with_positions};
 use crate::eq::target::{DesignOptions, HIGH_LIMIT_PRESETS};
+use crate::platform::{Applied, Device, Devices, InputGain, System};
 use crate::session::Session;
-use crate::system::{Applied, Devices, MicGain, Node, System};
 
 /// Command-line options that shape the wizard.
 #[derive(Debug, Clone, Default)]
@@ -37,7 +37,7 @@ pub struct Options {
     pub simulate: bool,
     /// Use this calibration file instead of downloading one.
     pub cal_file: Option<PathBuf>,
-    /// Use this PipeWire source instead of auto-detecting a UMIK-1.
+    /// Use this input (by name) instead of auto-detecting a UMIK-1.
     pub source: Option<String>,
     /// Override the dBFS → dB SPL offset.
     pub spl_offset: Option<f64>,
@@ -178,7 +178,7 @@ pub struct App {
     pub cal_status: CalStatus,
     cal_rx: Option<Receiver<Result<(Calibration, PathBuf)>>>,
 
-    pub mic_gain: Option<MicGain>,
+    pub mic_gain: Option<InputGain>,
 
     pub level: LevelState,
     pub measure: MeasureState,
@@ -219,18 +219,19 @@ impl App {
             };
             (
                 Env::Sim {
-                    config: Box::new(config),
+                    config: Box::new(config.clone()),
                     state: Arc::clone(&state),
                 },
-                Box::new(crate::system::sim::SimSystem::new(state)),
+                Box::new(crate::platform::sim::SimSystem::new(
+                    config,
+                    Arc::clone(&state),
+                )),
                 Vec::new(),
             )
         } else {
-            (
-                Env::Real,
-                Box::new(crate::system::Linux),
-                crate::system::missing_tools(),
-            )
+            let system = crate::platform::native();
+            let missing = system.missing();
+            (Env::Real, system, missing)
         };
         let serial_input = config
             .serial
@@ -351,13 +352,13 @@ impl App {
 
     /// The selected sink.
     #[must_use]
-    pub fn sink(&self) -> Option<&Node> {
+    pub fn sink(&self) -> Option<&Device> {
         self.devices.as_ref()?.sinks.get(self.sink_index)
     }
 
     /// The mic node.
     #[must_use]
-    pub fn mic(&self) -> Option<&Node> {
+    pub fn mic(&self) -> Option<&Device> {
         self.devices.as_ref()?.mic.as_ref()
     }
 
@@ -438,7 +439,7 @@ impl App {
 
     fn current_sink_volume(&mut self) -> Option<f64> {
         let sink = self.sink()?.clone();
-        self.system.sink_volume(&sink).ok()
+        self.system.output_volume(&sink).ok()
     }
 
     // ----- events -----
@@ -586,17 +587,14 @@ impl App {
         self.last_poll = Some(Instant::now());
         match self.system.devices() {
             Ok(mut d) => {
-                if let Some(name) = &self.options.source {
-                    d.mic = Some(Node {
-                        id: crate::system::pw::Dump::load()
-                            .ok()
-                            .and_then(|dump| dump.node_id(name))
-                            .unwrap_or(0),
-                        name: name.clone(),
-                        description: name.clone(),
-                        positions: vec![],
-                        alsa_card: None,
-                    });
+                if let Some(name) = self.options.source.clone() {
+                    d.mic = match self.system.find_input(&name) {
+                        Ok(found) => found,
+                        Err(e) => {
+                            self.set_error(&e);
+                            None
+                        }
+                    };
                 }
                 let wanted = self
                     .options
@@ -645,18 +643,13 @@ impl App {
             .sink()
             .cloned()
             .ok_or_else(|| anyhow!("no output device found"))?;
-        if !sink.is_stereo_capable() {
+        if !sink.stereo {
             return Err(anyhow!("{} has no left/right channels", sink.description));
         }
-        if self.devices.as_ref().is_some_and(|d| d.easyeffects_running) {
-            self.system.set_easyeffects_bypass(true)?;
+        if self.eq_host_running() {
+            self.system.set_eq_bypass(true)?;
         }
-        self.audio = Some(match &self.env {
-            Env::Real => Box::new(crate::audio::pipewire::PwCat::new(&mic.name, &sink.name)),
-            Env::Sim { config, state } => {
-                Box::new(SimBackend::new((**config).clone(), Arc::clone(state)))
-            }
-        });
+        self.audio = Some(self.system.audio(&mic, &sink));
         if !self.simulated() {
             self.config.sink = Some(sink.name.clone());
             self.config.save();
@@ -756,7 +749,7 @@ impl App {
         let Some(mic) = self.mic().cloned() else {
             return;
         };
-        match self.system.mic_gain(&mic) {
+        match self.system.input_gain(&mic) {
             Ok(g) => self.mic_gain = Some(g),
             Err(e) => self.set_error(&e),
         }
@@ -766,23 +759,25 @@ impl App {
         if code != KeyCode::Enter {
             return;
         }
-        if self.mic_gain.is_some_and(|g| g.is_unity()) {
+        if self.mic_gain.as_ref().is_some_and(InputGain::is_unity) {
             self.go(Step::Level);
             return;
         }
         let Some(mic) = self.mic().cloned() else {
             return;
         };
-        if let Err(e) = self.system.set_mic_unity(&mic) {
+        if let Err(e) = self.system.set_input_unity(&mic) {
             self.set_error(&e);
             return;
         }
         self.read_mic_gain();
-        if self.mic_gain.is_some_and(|g| g.is_unity()) {
+        if self.mic_gain.as_ref().is_some_and(InputGain::is_unity) {
             self.message = Some("Mic gain set to unity.".into());
         } else {
-            self.message =
-                Some("The mic gain did not change; check it with wpctl and alsamixer".into());
+            self.message = Some(format!(
+                "The mic gain did not change; {}",
+                self.system.input_gain_help()
+            ));
         }
     }
 
@@ -803,9 +798,9 @@ impl App {
                 let Some(sink) = self.sink().cloned() else {
                     return;
                 };
-                let current = self.system.sink_volume(&sink).unwrap_or(1.0);
+                let current = self.system.output_volume(&sink).unwrap_or(1.0);
                 let new = (current + step).clamp(0.0, 1.0);
-                match self.system.set_sink_volume(&sink, new) {
+                match self.system.set_output_volume(&sink, new) {
                     Ok(()) => self.level.sink_volume = Some(new),
                     Err(e) => self.set_error(&e),
                 }
@@ -978,12 +973,12 @@ impl App {
             .mic()
             .cloned()
             .ok_or_else(|| anyhow!("the mic disappeared"))?;
-        let gain = self.system.mic_gain(&mic)?;
+        let gain = self.system.input_gain(&mic)?;
         if !gain.is_unity() {
+            let now = gain.off_unity();
             self.mic_gain = Some(gain);
             return Err(anyhow!(
-                "the mic gain changed since step 3 (now {:.2}); press Esc and fix it",
-                gain.pw_volume
+                "the mic gain changed since step 3 (now {now}); press Esc and fix it"
             ));
         }
         let now = self.current_sink_volume();
@@ -996,8 +991,11 @@ impl App {
                      press Enter to measure at the new volume, or Esc to set the level again"
             ));
         }
-        if purpose == Purpose::Verify && self.system.easyeffects_bypass()? != Some(false) {
-            return Err(anyhow!("EasyEffects is bypassed or not running"));
+        if purpose == Purpose::Verify && self.system.eq_bypass()? != Some(false) {
+            return Err(anyhow!(
+                "{} is bypassed or not running",
+                self.eq_host_name()
+            ));
         }
         Ok(())
     }
@@ -1013,12 +1011,8 @@ impl App {
     }
 
     fn tick_measure(&mut self) {
-        let check_links = !self.simulated();
-        let sink_name = self.sink().map(|s| s.name.clone()).unwrap_or_default();
-        match self
-            .measure
-            .tick(self.system.as_mut(), check_links, &sink_name)
-        {
+        let sink = self.sink().cloned();
+        match self.measure.tick(self.system.as_mut(), sink.as_ref()) {
             measure::Tick::Idle | measure::Tick::Running => {}
             measure::Tick::Failed => {}
             measure::Tick::Captured(channel, recording) => self.sweep_done(channel, &recording),
@@ -1213,7 +1207,25 @@ impl App {
     /// True when the apply step is available.
     #[must_use]
     pub fn can_apply(&self) -> bool {
-        self.devices.as_ref().is_some_and(|d| d.easyeffects_running) && self.design.is_some()
+        self.eq_host_running() && self.design.is_some()
+    }
+
+    /// True when the platform's EQ host (EasyEffects on Linux) is running.
+    #[must_use]
+    pub fn eq_host_running(&self) -> bool {
+        self.devices
+            .as_ref()
+            .and_then(|d| d.eq_host.as_ref())
+            .is_some_and(|h| h.running)
+    }
+
+    /// The EQ host's name, for messages: "EasyEffects".
+    #[must_use]
+    pub fn eq_host_name(&self) -> &str {
+        self.devices
+            .as_ref()
+            .and_then(|d| d.eq_host.as_ref())
+            .map_or("the EQ host", |h| h.name.as_str())
     }
 
     fn key_save(&mut self, code: KeyCode) {
@@ -1234,12 +1246,14 @@ impl App {
             }
             KeyCode::Char('v') if self.save.applied.is_some() => self.start_sweeps(Purpose::Verify),
             KeyCode::Char('v') => {
+                let host = self.eq_host_name();
                 self.message = Some(if self.can_apply() {
-                    "Verify measures again through EasyEffects with the new EQ in it, so it comes \
-                     after applying: press a first."
-                        .into()
+                    format!(
+                        "Verify measures again through {host} with the new EQ in it, so it comes \
+                         after applying: press a first."
+                    )
                 } else {
-                    "Verify measures through EasyEffects, which is not running.".into()
+                    format!("Verify measures through {host}, which is not running.")
                 });
             }
             KeyCode::Enter => self.quit = true,
@@ -1261,14 +1275,14 @@ impl App {
                 return;
             }
         };
-        match self.system.apply_preset(&eq, &parent, &sink) {
+        match self.system.apply_eq(&eq, &parent, &sink) {
             Ok(applied) => self.save.applied = Some(applied),
             Err(e) => self.save.error = Some(format!("{e:#}")),
         }
     }
 
     /// Compares the verification sweep with the prediction. The broadband offset is
-    /// removed first (the EasyEffects sink has its own volume); what remains is shape.
+    /// removed first (the EQ host's output has its own volume); what remains is shape.
     fn finish_verify(&mut self) {
         if let Some(session) = &self.session {
             for (c, v) in self.measure.verify.iter().enumerate() {

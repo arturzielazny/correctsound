@@ -57,7 +57,41 @@ several mic positions, since deep bass varies more from seat to seat.
 software. EasyEffects only processes stereo, so that would mean driving a PipeWire
 filter-chain directly (crossover, subwoofer delay, three corrections): a different project.
 
+## Other operating systems
+
+The plan for running on more than Linux, in order. AGENTS.md has the rules; the short version
+is that every port adds a module under `src/platform/` and leaves the rest alone.
+
+1. **Make the core platform-neutral (done).** All OS code moved behind `platform::System`
+   and `audio::AudioBackend`, with neutral types: a `Device` instead of a PipeWire node, an
+   `InputGain` made of labelled settings instead of PipeWire and ALSA fields, an `EqHost`
+   instead of EasyEffects flags, `Route::ThroughEq`, a routing check the platform answers,
+   undo steps as closures. `platform::native()` picks the platform at compile time;
+   elsewhere `Unsupported` explains that only `--simulate` works. CI builds and tests on
+   Linux, macOS and Windows.
+2. **macOS.** A `src/platform/macos/` module:
+   - Audio: `cpal` (CoreAudio) at 48 kHz, playing to the chosen output and recording the
+     UMIK-1 (it shows up as a standard USB audio input). Check that macOS does not resample:
+     set the device's nominal rate to 48 kHz while measuring and restore it.
+   - Devices and volumes: CoreAudio properties (device list, names, channel count, input
+     volume scalar, output volume), through `objc2-core-audio` or `coreaudio-sys`.
+   - EQ host: macOS has no EasyEffects. The open option that can be scripted is CamillaDSP
+     with the BlackHole loopback driver (system output → BlackHole → CamillaDSP → speakers),
+     whose YAML config can be generated from the `EqSet`. Without it, files only
+     (left.txt/right.txt, which eqMac and others can import by hand).
+   - Terminal: charts are images in Ghostty, kitty, WezTerm and iTerm2 (kitty or sixel
+     protocol) and braille in Terminal.app; nothing to change.
+3. **Windows.** A `src/platform/windows/` module: WASAPI through `cpal` (exclusive mode if
+   shared mode resamples), endpoint volumes through the Core Audio API, and Equalizer APO
+   as the EQ host (an `Include:` line in its config.txt, backed up first). Windows Terminal
+   shows sixel images.
+4. **Other Linux audio stacks.** PulseAudio-only or JACK systems could get their own
+   `System` beside the PipeWire one, picked at run time by what is installed.
+
 ## Done
+
+- **Platform layer** (`src/platform/`): the first step towards other operating systems,
+  described above.
 
 - **Live placement mode** (`p` on the measure step): short bass sweeps in a loop, an
   evenness score, and a pinned curve to compare against. In the simulator, ←/→ move the

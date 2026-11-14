@@ -89,6 +89,8 @@ figcaption { font-size: .92rem; color: var(--muted); margin-top: 10px; }
 
 /* cards */
 .grid { display: grid; gap: 18px; }
+.grid > *, .plats > * { min-width: 0; }
+.plat code { white-space: nowrap; }
 .g3 { grid-template-columns: repeat(3, 1fr); }
 .g2 { grid-template-columns: repeat(2, 1fr); }
 @media (max-width: 900px) { .g3, .g2 { grid-template-columns: 1fr; } }
@@ -116,6 +118,24 @@ svg text { font-family: var(--sans); }
 .note { border-left: 3px solid var(--yellow); background: rgba(224,175,104,.07); padding: 14px 18px; border-radius: 0 10px 10px 0; margin: 20px 0; }
 .note.blue { border-color: var(--accent); background: rgba(125,207,255,.06); }
 .note.green { border-color: var(--green); background: rgba(158,206,106,.06); }
+
+/* platform layers */
+.layers { display: grid; gap: 10px; margin: 26px 0 8px; }
+.layer { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; }
+.layer h4 { margin: 0 0 10px; font-size: 1rem; color: var(--fg); }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { font: .82rem var(--mono); color: var(--fg-2); background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; }
+.seam { text-align: center; font: 600 .85rem var(--mono); color: var(--accent); padding: 8px; border: 1px dashed rgba(125,207,255,.5); border-radius: 10px; background: rgba(125,207,255,.05); }
+.plats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+@media (max-width: 900px) { .plats { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 520px) { .plats { grid-template-columns: 1fr; } }
+.plat { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; background: var(--panel); }
+.plat.todo { border-style: dashed; background: transparent; }
+.plat b { display: block; color: var(--fg); margin-bottom: 4px; }
+.plat small { display: block; color: var(--muted); font-size: .84rem; line-height: 1.45; }
+.plat .badge { display: inline-block; margin-top: 10px; font: 700 .7rem/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; padding: 5px 8px; border-radius: 6px; }
+.badge.done { background: var(--green); color: var(--bg); }
+.badge.open { background: rgba(224,175,104,.15); color: var(--yellow); border: 1px solid rgba(224,175,104,.4); }
 
 /* room treatment highlight */
 .spot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; width: fit-content; max-width: 100%; margin: 22px 0 0; padding: 10px 16px; border-radius: 12px; background: rgba(158,206,106,.08); border: 1px solid rgba(158,206,106,.35); color: var(--fg); }
@@ -659,7 +679,7 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
   <div class="wrap">
     <div class="eyebrow">Make it yours</div>
     <h2>Different setup? Give the code to your AI agent.</h2>
-    <p class="lede">CorrectSound does one setup well: Linux, PipeWire, EasyEffects, a UMIK-1, two speakers. If yours is a Mac, a Windows PC with Equalizer APO, a UMIK-2, a subwoofer, CamillaDSP, or a Raspberry Pi in a cupboard, you don't have to wait for anyone.</p>
+    <p class="lede">CorrectSound does one setup well: Linux, PipeWire, EasyEffects, a UMIK-1, two speakers. If yours is a Mac, a Windows PC with Equalizer APO, a UMIK-2, a subwoofer, CamillaDSP, or a Raspberry Pi in a cupboard, you don't have to wait for anyone. It already builds and runs its simulator on macOS and Windows; <a href="#platforms">the real hardware part is one folder away</a>.</p>
 
     <div class="note blue">
       <b>This code was written by an AI agent</b> (Claude, by Anthropic), with one person testing it on real speakers in a real room. Every line is meant to be taken: clone it, open your own agent in the folder (Claude Code, Codex, Cursor, Aider, whatever you like), describe your setup, and let it do the work. The code is about 11,000 lines of Rust, has a module comment at the top of each file, and a simulated room the agent can test against without making a sound.
@@ -673,38 +693,59 @@ cargo test</pre><p></p></div>
       <div class="card"><h3>3 · Share</h3><p>When it works on your hardware, open a pull request. Say what you tested on. The next person with your setup starts where you finished.</p></div>
     </div>
 
+    <h3 id="platforms" style="scroll-margin-top:80px">One app for every system</h3>
+    <p>Ports add a platform; they never fork the app. Everything that measures, designs the EQ and draws the screens is shared by every operating system. What differs (how to play and record, how to set volumes, which program applies the EQ) sits behind two small interfaces in <code>src/platform/</code>. A Mac port is one new folder next to <code>linux/</code>, and the Linux code doesn't change.</p>
+    <div class="layers" aria-label="The shared core sits above the platform interface; below it, one module per platform">
+      <div class="layer">
+        <h4>Shared by every OS</h4>
+        <div class="chips"><span class="chip">wizard · src/app</span><span class="chip">screens and charts · src/ui</span><span class="chip">sweeps, decay · src/dsp</span><span class="chip">EQ design · src/eq</span><span class="chip">curiosities</span><span class="chip">sessions and files</span></div>
+      </div>
+      <div class="seam">System + AudioBackend · src/platform/mod.rs</div>
+      <div class="plats">
+        <div class="plat"><b>Linux</b><small>PipeWire, ALSA, EasyEffects</small><span class="badge done">works</span></div>
+        <div class="plat"><b>Simulator</b><small>a virtual room for tests and <code>--simulate</code>, on every OS</small><span class="badge done">works</span></div>
+        <div class="plat todo"><b>macOS</b><small>CoreAudio; CamillaDSP or files only</small><span class="badge open">your pull request</span></div>
+        <div class="plat todo"><b>Windows</b><small>WASAPI, Equalizer APO</small><span class="badge open">your pull request</span></div>
+      </div>
+    </div>
+    <p>Every change is built and tested on Linux, macOS and Windows, so one person's port can't break another's. <a href="https://github.com/arturzielazny/correctsound/blob/main/AGENTS.md">AGENTS.md</a> holds the rules your agent should follow; the preamble below points it there.</p>
+
     <h3>The preamble: paste this first</h3>
     <pre class="copyable">You are working on CorrectSound, a Rust TUI that measures speakers with a measurement mic
-and generates room-correction EQ. Read README.md, CONTRIBUTING.md and IDEAS.md, then the
-module docs (src/lib.rs and the first comment of each file). Run `cargo test` before changing
-anything, and keep it passing.
+and generates room-correction EQ. Read AGENTS.md first, then README.md, CONTRIBUTING.md and
+IDEAS.md, and the module docs (the first comment of each file). Run `cargo test` before
+changing anything, and keep it passing.
 
 Rules:
+- This is one app for every operating system. Extend it; never rewrite it so it only works
+  on mine. Everything OS-specific goes in its own module under src/platform/, behind the
+  System and AudioBackend traits. Do not break or remove other platforms' code, and keep
+  the rest of the code OS-neutral. CI must pass on Linux, macOS and Windows.
 - Never play sound on my real speakers without asking me first and waiting for my answer.
   Use the simulator (src/audio/sim.rs, `--simulate`) for development and tests.
 - Back up any settings file of another program before overwriting it, and restore what you
   change when the app exits (see src/restore.rs).
-- Keep the DSP (src/dsp, src/eq) independent of the platform; put platform code behind the
-  existing traits (AudioBackend in src/audio, System in src/system).
 - Add tests for new behaviour, preferably end-to-end against the simulator, like
   tests/pipeline.rs and tests/wizard.rs.
 - Run `cargo fmt` and `cargo clippy --all-targets -- -D warnings` before you finish.</pre>
 
     <h3>Prompts that work as a starting point</h3>
     <div class="prompts">
-      <details class="prompt" open><summary>macOS</summary><div class="body"><pre class="copyable">Port CorrectSound to macOS. Audio: add an AudioBackend that plays and records through
-CoreAudio (the `cpal` crate is fine), at 48 kHz, routing playback to the device the user
-picks and recording from the UMIK-1. System: replace the PipeWire/wpctl/amixer parts with
-macOS equivalents (device list, input volume at unity, output volume), behind the System
-trait. Output: keep left.txt/right.txt (Equalizer APO format), and add an exporter for
-&lt;the EQ app I use: eqMac / SoundSource / none&gt;. Keep Linux working. Show me the plan
-before you write code.</pre></div></details>
-      <details class="prompt"><summary>Windows with Equalizer APO</summary><div class="body"><pre class="copyable">Port CorrectSound to Windows. Use WASAPI (via `cpal`) for playback and capture at 48 kHz,
-in exclusive mode if shared mode resamples. Replace the PipeWire/EasyEffects parts with
-Equalizer APO: write the filters to an include file under Equalizer APO's config directory
-and add one `Include:` line to config.txt (back up config.txt first; restore it on request).
-Detect whether Equalizer APO is installed on the chosen device and explain how to install it
-if not. Keep Linux working. Show me the plan before you write code.</pre></div></details>
+      <details class="prompt" open><summary>macOS</summary><div class="body"><pre class="copyable">Add macOS as a platform, following "Adding a platform" in AGENTS.md: a new module
+src/platform/macos/ selected in platform::native(), with no changes to how Linux works.
+Audio: an AudioBackend that plays and records through CoreAudio (the `cpal` crate is fine)
+at 48 kHz, to the output the user picks and from the UMIK-1. System: device list, input
+volume at unity, output volume, through CoreAudio. EQ host: &lt;CamillaDSP with BlackHole /
+eqMac / SoundSource / none, files only&gt;; read the macOS notes in IDEAS.md. If the shared
+code needs something new, add a neutral method to the System trait and implement it for
+Linux and the simulator too. Show me the plan before you write code.</pre></div></details>
+      <details class="prompt"><summary>Windows with Equalizer APO</summary><div class="body"><pre class="copyable">Add Windows as a platform, following "Adding a platform" in AGENTS.md: a new module
+src/platform/windows/ selected in platform::native(), with no changes to how Linux works.
+Use WASAPI (via `cpal`) for playback and capture at 48 kHz, in exclusive mode if shared
+mode resamples. EQ host: Equalizer APO. Write the filters to an include file under its
+config directory and add one `Include:` line to config.txt (back up config.txt first,
+register the undo). Detect whether Equalizer APO is installed on the chosen device and
+explain how to install it if not. Show me the plan before you write code.</pre></div></details>
       <details class="prompt"><summary>Another measurement mic (UMIK-2, iMM-6, any calibrated mic)</summary><div class="body"><pre class="copyable">Add support for a &lt;miniDSP UMIK-2 / Dayton Audio iMM-6 / my own mic with a .cal file&gt;.
 The UMIK-2 records at 44.1–192 kHz and has its own calibration download; other mics come with
 a calibration file in a different format and need a sensitivity entered by hand. Detect the
@@ -718,7 +759,7 @@ starting with the alignment step and the level hint. Extend the simulator with a
 without sound.</pre></div></details>
       <details class="prompt"><summary>CamillaDSP or PipeWire's filter chain instead of EasyEffects</summary><div class="body"><pre class="copyable">I don't use EasyEffects. Add an output for &lt;CamillaDSP / a PipeWire filter-chain module&gt;:
 generate its configuration from the EqSet (src/eq), install and load it the way
-src/system/easyeffects.rs does for EasyEffects (back up, apply, autoload, restore), and let
+src/platform/linux/easyeffects.rs does for EasyEffects (back up, apply, autoload, restore), and let
 the user pick the output in step 1 when both are available. Verification (the `v` key) must
 measure through the new path.</pre></div></details>
       <details class="prompt"><summary>A headless box (Raspberry Pi, streamer)</summary><div class="body"><pre class="copyable">My speakers are driven by a Raspberry Pi without a display. Add a non-interactive mode:
@@ -795,6 +836,8 @@ correctsound review          # open the newest again, re-analysed, nothing playe
     <p>Yes. Each speaker gets its own measurement, target level and filters, in one split-channel equalizer. A loudness difference between them is fixed with balance, not with filters.</p>
     <h3>Why not FIR, phase correction, time alignment?</h3>
     <p>For a seated listener in a normal room, most audible, correctable problems are in the magnitude response, and parametric EQ fixes them with no latency and in a form you can read and edit. FIR is on the list of ideas; the prompts above show how to add it.</p>
+    <h3>Mac? Windows? Another Linux?</h3>
+    <p>It runs on any Linux distribution with PipeWire, not just Arch; EasyEffects is optional. On macOS and Windows it builds and the simulator works today, but measuring real speakers needs a platform module, one folder under <code>src/platform/</code>. <a href="#platforms">Here is how</a>, with a prompt for your AI agent.</p>
     <h3>Can I use another mic?</h3>
     <p>Yes: <code>--cal-file</code> and <code>--source</code> take any calibration file and PipeWire input. Automatic detection and download are UMIK-1 only for now.</p>
     <h3>Patents?</h3>

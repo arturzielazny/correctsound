@@ -136,14 +136,27 @@ restarting without saving its state; an autoload file it replaces is backed up i
 - SPL = dBFS + 124 − sensitivity factor (matches REW on a current UMIK-1). Older 18 dB-gain
   mics are marked approximate. The EQ only depends on the response shape, not this constant.
 
+## Platforms
+
+| | Status |
+|---|---|
+| Linux (any distribution with PipeWire) | Works. EasyEffects is optional; without it you get the EQ files. |
+| macOS, Windows | Builds, and `--simulate` works. Measuring real speakers needs a platform module: one folder under `src/platform/`. |
+
+Everything that depends on the operating system lives in `src/platform/`, behind two
+interfaces; the rest (measuring, EQ design, the screens) is shared. CI builds and tests every
+change on Linux, macOS and Windows. A port adds a platform and never rewrites the app for one
+OS: [AGENTS.md](AGENTS.md) has the layout, a checklist for adding a platform, and the rules.
+
 ## Make it yours
 
 CorrectSound does one setup well: Linux, PipeWire, EasyEffects, a UMIK-1, two speakers. Yours
 may differ: macOS, Windows, a UMIK-2 or another mic, a subwoofer, CamillaDSP, a receiver with
 its own EQ. **Clone the repository and give it to your favourite AI coding agent.** The code is
 small (about 11k lines of Rust), tested against a simulated room, and written to be read.
-[CONTRIBUTING.md](CONTRIBUTING.md) has prompts that work as a starting point, and
-[IDEAS.md](IDEAS.md) lists what is planned and why.
+[CONTRIBUTING.md](CONTRIBUTING.md) has prompts that work as a starting point,
+[AGENTS.md](AGENTS.md) the rules your agent should follow, and [IDEAS.md](IDEAS.md) what is
+planned and why.
 
 When it works for you, open a pull request, so the next person with your setup does not have
 to start over.

@@ -1,4 +1,4 @@
-//! `correctsound`: measure speakers with a UMIK-1 and generate EasyEffects EQ.
+//! `correctsound`: measure speakers with a measurement mic and generate room-correction EQ.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -18,11 +18,10 @@ use correctsound::eq::fit::design_with_positions;
 use correctsound::eq::target::DesignOptions;
 use correctsound::insights;
 use correctsound::session::{Session, read_wav};
-use correctsound::system::System;
 use correctsound::ui::graphics::Graphics;
-use correctsound::{analysis, cal, restore, system};
+use correctsound::{analysis, cal, platform, restore};
 
-/// Room correction for PipeWire + EasyEffects with a miniDSP UMIK-1.
+/// Room correction with a miniDSP UMIK-1: PipeWire + EasyEffects on Linux.
 ///
 /// Run without arguments for the step-by-step wizard.
 #[derive(Debug, Parser)]
@@ -36,7 +35,7 @@ struct Cli {
     /// Use this calibration file instead of downloading one.
     #[arg(long, value_name = "FILE")]
     cal_file: Option<PathBuf>,
-    /// Use this PipeWire source (node name) instead of detecting a UMIK-1.
+    /// Use this input (its name, e.g. a PipeWire node name) instead of detecting a UMIK-1.
     #[arg(long, value_name = "NODE")]
     source: Option<String>,
     /// Preselect this output sink (node name).
@@ -172,11 +171,15 @@ fn pick_session(arg: Option<&str>) -> Result<PathBuf> {
 fn wizard(options: Options) -> Result<()> {
     // Restore the system on SIGTERM / SIGHUP / SIGINT (raw mode turns Ctrl-C into a key).
     let signalled = Arc::new(AtomicBool::new(false));
-    for sig in [
+    #[cfg(unix)]
+    let signals = [
         signal_hook::consts::SIGTERM,
         signal_hook::consts::SIGHUP,
         signal_hook::consts::SIGINT,
-    ] {
+    ];
+    #[cfg(not(unix))]
+    let signals = [signal_hook::consts::SIGTERM, signal_hook::consts::SIGINT];
+    for sig in signals {
         signal_hook::flag::register(sig, Arc::clone(&signalled))
             .context("installing signal handler")?;
     }
@@ -213,13 +216,7 @@ fn wizard(options: Options) -> Result<()> {
     restore::run_all();
     ratatui::restore();
     if !undo.is_empty() {
-        println!(
-            "Restored: {}",
-            undo.iter()
-                .map(|u| u.key.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
+        println!("Restored: {}", undo.join(", "));
     }
     if let Some(dir) = session {
         println!("Session saved in {}", dir.display());
@@ -241,12 +238,7 @@ fn spawn_watchdog(signalled: Arc<AtomicBool>) {
         let mut signal_seen: Option<std::time::Instant> = None;
         loop {
             std::thread::sleep(WATCHDOG_PERIOD);
-            // Opening the controlling terminal fails once it has hung up (window closed).
-            let terminal_gone = std::fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open("/dev/tty")
-                .is_err();
+            let terminal_gone = terminal_gone();
             if !terminal_gone {
                 if !signalled.load(Ordering::Relaxed) {
                     continue;
@@ -267,28 +259,44 @@ fn spawn_watchdog(signalled: Arc<AtomicBool>) {
     });
 }
 
+/// True once the controlling terminal has gone away (its window was closed).
+#[cfg(unix)]
+fn terminal_gone() -> bool {
+    // Opening the controlling terminal fails once it has hung up.
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+        .is_err()
+}
+
+/// True once the controlling terminal has gone away. Without a cheap check on this
+/// platform, a closed console ends the process through the signal handlers instead.
+#[cfg(not(unix))]
+fn terminal_gone() -> bool {
+    false
+}
+
 fn devices() -> Result<()> {
-    let missing = system::missing_tools();
+    let mut sys = platform::native();
+    println!("Platform: {}", sys.name());
+    let missing = sys.missing();
     if !missing.is_empty() {
         println!("Missing: {}", missing.join(", "));
     }
-    let mut sys = system::Linux;
     let d = sys.devices()?;
     match &d.mic {
         Some(m) => {
-            let gain = sys.mic_gain(m)?;
+            let gain = sys.input_gain(m)?;
             println!("Mic:      {} ({})", m.description, m.name);
-            println!(
-                "          PipeWire volume {:.2}{}, ALSA {}",
-                gain.pw_volume,
-                if gain.pw_muted { " MUTED" } else { "" },
-                gain.alsa.map_or("n/a".to_owned(), |a| format!(
-                    "{}/{}{}",
-                    a.value,
-                    a.max,
-                    if a.switch_on { "" } else { " off" }
-                ))
-            );
+            for s in &gain.settings {
+                println!(
+                    "          {} {}{}",
+                    s.label,
+                    s.value,
+                    if s.at_unity { "" } else { "  (not unity)" }
+                );
+            }
         }
         None => println!("Mic:      no UMIK-1 found"),
     }
@@ -300,21 +308,23 @@ fn devices() -> Result<()> {
             " "
         };
         let vol = sys
-            .sink_volume(s)
+            .output_volume(s)
             .map_or("?".to_owned(), |v| format!("{v:.2}"));
         println!(
             "  {mark} {} [{}] volume {vol}\n      {}",
             s.description,
-            s.positions.join(","),
+            if s.stereo { "stereo" } else { "mono" },
             s.name
         );
     }
-    match sys.easyeffects_bypass()? {
-        Some(b) => println!(
-            "EasyEffects: running, global bypass {}",
+    match (&d.eq_host, sys.eq_bypass()?) {
+        (Some(h), Some(b)) => println!(
+            "{}: running, global bypass {}",
+            h.name,
             if b { "ON" } else { "off" }
         ),
-        None => println!("EasyEffects: not running"),
+        (Some(h), None) => println!("{}: not running", h.name),
+        (None, _) => println!("EQ host: none supported on this platform"),
     }
     if !d.other_streams.is_empty() {
         println!("Other output streams: {}", d.other_streams.join(", "));
@@ -323,10 +333,9 @@ fn devices() -> Result<()> {
 }
 
 fn meter(seconds: u64, cal_file: Option<&std::path::Path>, spl_offset: Option<f64>) -> Result<()> {
-    use correctsound::audio::pipewire::PwCat;
-    use correctsound::audio::{AudioBackend, Program, Route, Source};
+    use correctsound::audio::{Program, Route, Source};
     use correctsound::dsp::level::{LevelMeter, rms_dbfs};
-    let mut sys = system::Linux;
+    let mut sys = platform::native();
     let d = sys.devices()?;
     let mic = d.mic.context("no UMIK-1 found")?;
     let sens = match cal_file {
@@ -340,8 +349,8 @@ fn meter(seconds: u64, cal_file: Option<&std::path::Path>, spl_offset: Option<f6
         || SplScale::from_sens_factor(sens),
         |o| SplScale { offset_db: o },
     );
-    let sink = d.sinks.first().map(|s| s.name.clone()).unwrap_or_default();
-    let mut audio = PwCat::new(&mic.name, &sink);
+    let sink = d.sinks.first().cloned().context("no output device found")?;
+    let mut audio = sys.audio(&mic, &sink);
     let stream = audio.start(
         Source::new(Program::Silence, Channel::Left),
         Route::Hardware,

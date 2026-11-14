@@ -1,0 +1,5 @@
+# Same line endings on every OS, so builds and tests behave alike on Windows.
+* text=auto eol=lf
+# Test fixtures are byte-exact (the calibration examples use CRLF on purpose).
+tests/data/** -text
+*.png binary
