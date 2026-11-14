@@ -19,8 +19,10 @@ It replaces the REW → export → import routine with one wizard.
 cargo install --path .
 ```
 
-Needs `pipewire` (for `pw-cat`, `pw-dump`), `wireplumber` (`wpctl`) and `alsa-utils` (`amixer`).
-EasyEffects is optional: without it you still get the EQ files. Try it without any hardware:
+On Linux it needs `pipewire` (for `pw-cat`, `pw-dump`), `wireplumber` (`wpctl`) and
+`alsa-utils` (`amixer`). EasyEffects is optional: without it you still get the EQ files. On
+macOS and Windows only the simulator and the saved-session commands work for now (see
+[Platforms](#platforms)). Try it without any hardware, on any OS:
 
 ```sh
 correctsound --simulate

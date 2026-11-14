@@ -238,7 +238,7 @@ impl System for Unsupported {
 
     fn missing(&self) -> Vec<String> {
         vec![format!(
-            "support for {} (try --simulate)",
+            "support for measuring on {} (correctsound --simulate works)",
             std::env::consts::OS
         )]
     }

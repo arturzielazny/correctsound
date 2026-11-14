@@ -247,11 +247,13 @@ fn preflight(frame: &mut Frame<'_>, area: Rect, app: &App) {
     for t in &app.missing_tools {
         lines.push(Line::from(bad(&format!("missing {t}"))));
     }
-    match app.mic() {
-        Some(m) => lines.push(Line::from(ok(&format!("Mic: {}", m.description)))),
-        None => lines.push(Line::from(warn(
+    match (app.mic(), &app.devices) {
+        (Some(m), _) => lines.push(Line::from(ok(&format!("Mic: {}", m.description)))),
+        (None, Some(_)) => lines.push(Line::from(warn(
             "Plug in the UMIK-1 — waiting for it to appear…",
         ))),
+        // The devices could not be listed; the reason is shown below.
+        (None, None) => {}
     }
     if let Some(d) = &app.devices {
         match &d.eq_host {
@@ -1095,9 +1097,17 @@ fn save(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Graphics) {
         (None, true) => lines.push(Line::from(format!(
             "Press a to install the preset in {host} and load it (its current settings are backed up first)."
         ))),
-        (None, false) => lines.push(Line::from(format!(
-            "{host} is not running: load left.txt / right.txt into its equalizer by hand, one per channel."
-        ))),
+        (None, false) => lines.push(Line::from(
+            match app.devices.as_ref().and_then(|d| d.eq_host.as_ref()) {
+                Some(h) => format!(
+                    "{} is not running: load left.txt / right.txt into its equalizer by hand, one per channel.",
+                    h.name
+                ),
+                None => "No EQ program to load it into here: load left.txt / right.txt into your \
+                         equalizer by hand, one per channel."
+                    .to_owned(),
+            },
+        )),
     }
     if let Some(issue) = &app.measure.issue {
         lines.push(Line::from(bad(issue)));

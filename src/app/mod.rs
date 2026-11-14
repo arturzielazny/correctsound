@@ -612,6 +612,9 @@ impl App {
                 }
                 self.devices = Some(d);
             }
+            // Reviewing needs devices only for applying; where there are none (a platform
+            // without support), the review itself still works.
+            Err(_) if self.reviewing() => {}
             Err(e) => self.set_error(&e),
         }
     }

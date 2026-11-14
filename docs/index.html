@@ -78,6 +78,9 @@ nav.top .gh { padding: 6px 14px; border: 1px solid var(--line); border-radius: 9
 .btn:hover { text-decoration: none; filter: brightness(1.08); }
 .install { margin-top: 18px; display: flex; width: fit-content; white-space: nowrap; align-items: center; gap: 10px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; font: .92rem var(--mono); color: var(--fg); max-width: 100%; overflow-x: auto; }
 .install .prompt { color: var(--green); }
+.os-note { margin: 10px 0 0; font-size: .92rem; color: var(--muted); }
+.yes { color: var(--green); font-weight: 600; }
+.no { color: var(--muted); }
 .shot { border-radius: var(--radius); border: 1px solid var(--line); overflow: hidden; background: var(--bg-2); box-shadow: 0 30px 80px -30px rgba(0,0,0,.8), 0 0 0 1px rgba(255,255,255,.02); }
 .shot .bar { display: flex; gap: 7px; padding: 10px 14px; background: var(--panel); border-bottom: 1px solid var(--line); }
 .shot .bar i { width: 11px; height: 11px; border-radius: 50%; background: var(--line); display: block; }
@@ -220,6 +223,7 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
     </div>
     <a class="spot" href="#treatment" style="text-decoration:none"><span class="tag">Room treatment</span><span>Carry a bass trap from corner to corner and <b>watch the bass change every two seconds</b>.</span><span style="color:var(--green)">How →</span></a>
     <div class="install"><span class="prompt">$</span> cargo install --git https://github.com/arturzielazny/correctsound &amp;&amp; correctsound --simulate</div>
+    <p class="os-note">The simulator tour runs on Linux, macOS and Windows. Measuring real speakers works on Linux today; <a href="#where">what works where</a>.</p>
     <figure class="shot">
       <div class="bar"><i></i><i></i><i></i></div>
       <img src="img/6-result.png" alt="The result screen: the measured response (orange), the target (dashed green) and the predicted result (blue), above the equalizer's curve and a list of filters" width="1800" height="1144">
@@ -803,13 +807,21 @@ and how you would test it on the simulator. Wait for my go-ahead before writing 
   <div class="wrap narrow">
     <div class="eyebrow">Install</div>
     <h2>Get started</h2>
-    <p>You need Rust, PipeWire with WirePlumber, and <code>alsa-utils</code>. EasyEffects is optional: without it you still get the filter files. Any terminal works; Ghostty, kitty and foot show the charts as images.</p>
+    <h3 id="where" style="scroll-margin-top:80px">What works where</h3>
+    <table>
+      <tr><th></th><th>Linux</th><th>macOS</th><th>Windows</th></tr>
+      <tr><td>Simulator tour (<code>--simulate</code>)</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td></tr>
+      <tr><td>Saved sessions: <code>sessions</code>, <code>review</code>, <code>fit</code></td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td></tr>
+      <tr><td>Measuring your speakers, live placement, applying the EQ</td><td class="yes">yes</td><td class="no">not yet</td><td class="no">not yet</td></tr>
+    </table>
+    <p style="margin-top:14px">On macOS and Windows every change is built and tested automatically, but measuring needs a platform module that nobody has written yet: <a href="#platforms">it is one folder, and your AI agent can write it</a>. Until then, <code>correctsound</code> there says so and points to the simulator.</p>
+    <p><b>You need Rust</b> everywhere (<a href="https://rustup.rs">rustup.rs</a>). <b>On Linux</b>, also PipeWire with WirePlumber and <code>alsa-utils</code>, on any distribution. EasyEffects is optional: without it you still get the filter files. Any terminal works; Ghostty, kitty, WezTerm and foot show the charts as images, others draw them with braille dots.</p>
     <pre>git clone https://github.com/arturzielazny/correctsound
 cd correctsound
 cargo install --path .
 
-correctsound --simulate      # a tour with a simulated room, no hardware
-correctsound                 # the real thing: plug in the UMIK-1 first
+correctsound --simulate      # a tour with a simulated room, no hardware (any OS)
+correctsound                 # the real thing, on Linux: plug in the UMIK-1 first
 correctsound sessions        # your saved measurements
 correctsound review          # open the newest again, re-analysed, nothing played</pre>
     <table style="margin-top:26px">
