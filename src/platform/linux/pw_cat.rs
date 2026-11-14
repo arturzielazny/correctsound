@@ -106,8 +106,10 @@ fn spawn_capture(mic: &str, children: &Shared, tx: mpsc::Sender<Vec<f32>>) -> Re
             carry.extend_from_slice(&buf[..n]);
             let whole = carry.len() / 4 * 4;
             let samples: Vec<f32> = carry[..whole]
-                .chunks_exact(4)
-                .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|b| f32::from_le_bytes(*b))
                 .collect();
             carry.drain(..whole);
             if tx.send(samples).is_err() {

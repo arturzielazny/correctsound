@@ -119,7 +119,8 @@ impl Source {
     /// Fills interleaved stereo `out`; frames past the end of a `Once` program are silent.
     pub fn fill(&mut self, out: &mut [f32]) {
         let ch = self.channel.index();
-        for frame in out.chunks_exact_mut(2) {
+        let (frames, _) = out.as_chunks_mut::<2>();
+        for frame in frames {
             frame[0] = 0.0;
             frame[1] = 0.0;
             frame[ch] = self.next_sample();
