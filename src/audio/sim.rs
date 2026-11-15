@@ -59,7 +59,12 @@ pub struct SimConfig {
     /// The simulated mic's own response (a high shelf), removed again by [`SimConfig::calibration`].
     pub mic_shelf: (f64, f64),
     pub sens_factor: f64,
+    /// The mic's hiss, white, dBFS RMS.
     pub noise_dbfs: f64,
+    /// The room's rumble (traffic, ventilation): noise falling 12 dB per octave above
+    /// 60 Hz, set by the level of the white noise it is made from, dBFS RMS. About 38 dB SPL
+    /// in the 63 Hz octave: a real room with some traffic or ventilation.
+    pub rumble_dbfs: f64,
     /// 1.0 = real time; larger values run measurements faster.
     pub speed: f64,
 }
@@ -102,6 +107,7 @@ impl Default for SimConfig {
             mic_shelf: (6000.0, 2.0),
             sens_factor: -0.3,
             noise_dbfs: -95.0,
+            rumble_dbfs: -52.0,
             speed: 1.0,
         }
     }
@@ -208,6 +214,8 @@ struct Chain {
     mic_state: BiquadState,
     gain: f64,
     noise: f64,
+    /// Rumble: input level, the two one-pole low-passes' coefficient and states.
+    rumble: (f64, f64, f64, f64),
     rng: Rng,
 }
 
@@ -263,6 +271,12 @@ impl Chain {
             mic_state: BiquadState::default(),
             gain: db_to_amplitude(room.gain_db) * st.sink_volume.powi(3),
             noise: db_to_amplitude(config.noise_dbfs) / 2f64.sqrt(),
+            rumble: (
+                db_to_amplitude(config.rumble_dbfs),
+                1.0 - (-std::f64::consts::TAU * 60.0 / RATE).exp(),
+                0.0,
+                0.0,
+            ),
             rng: Rng::new(seed),
         }
     }
@@ -308,7 +322,10 @@ impl Chain {
             let delayed = self.wet[at(self.delay)];
             self.pos += 1;
             let z = self.mic.tick(&mut self.mic_state, delayed) * self.gain;
-            *v = (z + self.noise * self.rng.next_gaussian()) as f32;
+            let (level, a, y1, y2) = &mut self.rumble;
+            *y1 += *a * (*level * self.rng.next_gaussian() - *y1);
+            *y2 += *a * (*y1 - *y2);
+            *v = (z + *y2 + self.noise * self.rng.next_gaussian()) as f32;
         }
     }
 }

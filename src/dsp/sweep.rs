@@ -148,6 +148,15 @@ impl Default for IrWindow {
 /// FFT length used for the windowed impulse response (0.73 Hz bins at 48 kHz).
 pub const SPECTRUM_FFT_LEN: usize = 1 << 16;
 
+/// Where the noise in the bass octaves is measured in the impulse response, ms after the
+/// direct sound: late enough that the room has stopped ringing, so the margin is the
+/// background noise's and not the room's own decay.
+const NOISE_AFTER_MS: f64 = 2000.0;
+/// Octaves centred below this use that late noise window, Hz. For the default sweep its
+/// stretch of recording ends 2 s before the recording does (250 Hz octave: at 5.6 s of
+/// 7.5 s).
+const LATE_NOISE_BELOW_HZ: f64 = 300.0;
+
 /// Result of analysing one sweep recording.
 #[derive(Debug, Clone)]
 pub struct SweepAnalysis {
@@ -231,14 +240,29 @@ impl SweepAnalysis {
 
         let power = windowed_power(&ir, peak, window, rate);
         // The same window placed on a stretch of IR that holds only noise: this is exactly
-        // the noise that ends up in `power`. It starts after the room's decay and well
-        // before the distortion products, which wrap around to the end of the IR.
-        let noise_peak = peak + ms(window.pre_ms + window.total_ms + 100.0);
-        let noise_power = windowed_power(&ir, noise_peak % n, window, rate);
+        // the noise that ends up in `power`. Just after the window for the treble, where
+        // the room is quiet again within a few hundred ms; for the bass, NOISE_AFTER_MS
+        // after the direct sound, when even a boomy room has stopped ringing (in real rooms
+        // a 50 Hz mode is still 40 dB up at 0.6 s). Both are well before the distortion
+        // products, which wrap around to the last 1.5 s of the IR. The late window cannot
+        // serve the treble: the IR at a given time is made from the recording later on by
+        // the time the sweep took to reach that frequency, and for the treble that is past
+        // the end of the recording, where there is no noise to measure.
+        let early = peak + ms(window.pre_ms + window.total_ms + 100.0);
+        let late = peak + ms(NOISE_AFTER_MS);
+        let noise_early = windowed_power(&ir, early % n, window, rate);
+        let noise_late = windowed_power(&ir, late % n, window, rate);
         let bin_hz = rate / SPECTRUM_FFT_LEN as f64;
         let octave_snr_db: Vec<(f64, f64)> = SNR_BANDS_HZ
             .iter()
-            .map(|&c| (c, band_snr_db(&power, &noise_power, bin_hz, c)))
+            .map(|&c| {
+                let noise = if c < LATE_NOISE_BELOW_HZ {
+                    &noise_late
+                } else {
+                    &noise_early
+                };
+                (c, band_snr_db(&power, noise, bin_hz, c))
+            })
             .collect();
         if let Some(&(freq_hz, margin_db)) = octave_snr_db
             .iter()

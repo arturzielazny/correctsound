@@ -13,7 +13,7 @@ use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Gauge, List, ListItem, ListState, Paragraph, Wrap};
 
-use crate::app::level::{ABORT_SPL, TARGET_SPL, TOLERANCE};
+use crate::app::level::{ABORT_SPL, TOLERANCE};
 use crate::app::{App, CalStatus, LevelPhase, Overlay, Step, VerifyResult};
 use crate::audio::Channel;
 use crate::cal::Orientation;
@@ -180,8 +180,11 @@ fn step_hints(app: &App) -> &'static str {
             "type the serial   Tab mic orientation   Enter download / continue   Esc back"
         }
         Step::MicGain => "Enter set to unity / continue   Esc back   q quit",
+        Step::Level if app.level.phase == LevelPhase::Listening => {
+            "Enter play the noise at the suggested level   Esc back"
+        }
         Step::Level => {
-            "↑/↓ output volume   Tab other channel   Space restart   Enter continue   Esc back"
+            "↑/↓ output volume   Tab other channel   Space restart   l listen again   Enter continue   Esc back"
         }
         Step::Measure if app.measure.running() => "s stop",
         Step::Measure => {
@@ -412,6 +415,11 @@ fn mic_gain(frame: &mut Frame<'_>, area: Rect, app: &App) {
 
 fn level(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let l = &app.level;
+    if l.phase == LevelPhase::Listening {
+        listening(frame, area, app);
+        return;
+    }
+    let target = l.target_spl;
     let [info, meter, details] = Layout::vertical([
         Constraint::Length(5),
         Constraint::Length(7),
@@ -420,7 +428,8 @@ fn level(frame: &mut Frame<'_>, area: Rect, app: &App) {
     .areas(area);
     let instructions = vec![
         Line::from(format!(
-            "Pink noise (500–2000 Hz) plays from one speaker. Turn your amplifier until the meter reads {TARGET_SPL:.0} dB."
+            "Pink noise (500–2000 Hz) plays from one speaker. Turn your amplifier until the meter \
+             reads {target:.0} dB: the level your room's background noise calls for."
         )),
         Line::from(
             "Put the mic where your head is when listening, at ear height, pointing as chosen in step 2.",
@@ -435,7 +444,7 @@ fn level(frame: &mut Frame<'_>, area: Rect, app: &App) {
     );
 
     let title = match &l.phase {
-        LevelPhase::Ambient => "Measuring background noise — keep quiet…".to_owned(),
+        LevelPhase::Listening => "Listening to the room…".to_owned(),
         LevelPhase::Playing if l.fading_in() => {
             format!("{} speaker — fading in…", l.channel.name())
         }
@@ -446,21 +455,21 @@ fn level(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let spl = l.spl.filter(|_| l.phase == LevelPhase::Playing);
     let (ratio, color, label) = match spl {
         Some(s) => {
-            let lo = TARGET_SPL - 20.0;
+            let lo = target - 20.0;
             let ratio = ((s - lo) / 30.0).clamp(0.0, 1.0);
-            let color = if (s - TARGET_SPL).abs() <= TOLERANCE {
+            let color = if (s - target).abs() <= TOLERANCE {
                 Color::Green
-            } else if s > TARGET_SPL {
+            } else if s > target {
                 Color::LightRed
             } else {
                 Color::Yellow
             };
-            let hint = if (s - TARGET_SPL).abs() <= TOLERANCE {
+            let hint = if (s - target).abs() <= TOLERANCE {
                 "  ✔ good".to_owned()
-            } else if s > TARGET_SPL {
-                format!("  turn down {:.1} dB", s - TARGET_SPL)
+            } else if s > target {
+                format!("  turn down {:.1} dB", s - target)
             } else {
-                format!("  turn up {:.1} dB", TARGET_SPL - s)
+                format!("  turn up {:.1} dB", target - s)
             };
             (ratio, color, format!("{s:.1} dB SPL{hint}"))
         }
@@ -485,14 +494,14 @@ fn level(frame: &mut Frame<'_>, area: Rect, app: &App) {
             .label(Span::styled(label, Style::default().bold())),
         gauge,
     );
-    // Scale under the gauge: 55 … 85 dB with the target marked.
+    // Scale under the gauge: 20 dB below the target to 10 above, with the target marked.
     let width = scale.width as usize;
     let mut marks = vec![' '; width];
-    let pos = |db: f64| (((db - (TARGET_SPL - 20.0)) / 30.0) * width as f64).round() as usize;
+    let pos = |db: f64| (((db - (target - 20.0)) / 30.0) * width as f64).round() as usize;
     for (db, ch) in [
-        (TARGET_SPL - TOLERANCE, '['),
-        (TARGET_SPL, '▲'),
-        (TARGET_SPL + TOLERANCE, ']'),
+        (target - TOLERANCE, '['),
+        (target, '▲'),
+        (target + TOLERANCE, ']'),
     ] {
         if let Some(m) = marks.get_mut(pos(db).min(width.saturating_sub(1))) {
             *m = ch;
@@ -505,11 +514,21 @@ fn level(frame: &mut Frame<'_>, area: Rect, app: &App) {
     if let LevelPhase::Stopped(reason) = &l.phase {
         lines.push(Line::from(bad(reason)));
     }
+    if let Some(n) = &l.room_noise {
+        let groups: Vec<String> = NOISE_GROUPS
+            .iter()
+            .map(|g| format!("{} {:.0}", g.name.to_lowercase(), group_level(n, g)))
+            .collect();
+        lines.push(Line::from(format!(
+            "Background noise: {} dB SPL (l listens again)",
+            groups.join(", ")
+        )));
+    }
     if let Some(a) = l.ambient_spl {
-        let text = format!("Background noise: {a:.0} dB SPL in the test band");
+        let text = format!("In the meter's band the background is {a:.0} dB SPL");
         lines.push(Line::from(if l.room_is_noisy() {
             warn(&format!(
-                "{text} — the room is noisy; results at the extremes will be less reliable"
+                "{text}, close enough to the noise to raise the reading a little"
             ))
         } else {
             ok(&text)
@@ -545,6 +564,190 @@ fn level(frame: &mut Frame<'_>, area: Rect, app: &App) {
             .block(panel("Status"))
             .wrap(Wrap { trim: true }),
         details,
+    );
+}
+
+/// A range of octaves shown as one line of the background noise.
+struct NoiseGroup {
+    name: &'static str,
+    range: &'static str,
+    /// Indices into [`crate::dsp::ambient::OCTAVES`].
+    octaves: std::ops::RangeInclusive<usize>,
+    /// What usually makes noise there.
+    sources: &'static str,
+}
+
+const NOISE_GROUPS: [NoiseGroup; 3] = [
+    NoiseGroup {
+        name: "Bass",
+        range: "20–180 Hz",
+        octaves: 0..=2,
+        sources: "traffic, ventilation, fridges, the building",
+    },
+    NoiseGroup {
+        name: "Mids",
+        range: "180 Hz–1.4 kHz",
+        octaves: 3..=5,
+        sources: "voices, fans, appliances",
+    },
+    NoiseGroup {
+        name: "Highs",
+        range: "1.4–20 kHz",
+        octaves: 6..=9,
+        sources: "hiss, computer fans, birds",
+    },
+];
+
+/// A group's level: the power sum of its octaves, dB SPL.
+fn group_level(noise: &crate::dsp::ambient::OctaveLevels, g: &NoiseGroup) -> f64 {
+    crate::dsp::power_to_db(
+        noise[g.octaves.clone()]
+            .iter()
+            .map(|&d| crate::dsp::db_to_power(d))
+            .sum(),
+    )
+}
+
+/// What a measurement level means, in words and colour.
+fn level_verdict(needs: f64) -> (&'static str, Color) {
+    use crate::dsp::ambient::{MAX_LEVEL_SPL, MIN_LEVEL_SPL};
+    if needs <= MIN_LEVEL_SPL {
+        ("quiet", Color::Green)
+    } else if needs <= 70.0 {
+        ("some noise", Color::Yellow)
+    } else if needs <= MAX_LEVEL_SPL {
+        ("noisy", Color::LightRed)
+    } else {
+        ("too noisy", Color::Red)
+    }
+}
+
+/// Step 4, first part: listening to the room, live, and the level it calls for.
+fn listening(frame: &mut Frame<'_>, area: Rect, app: &App) {
+    use crate::dsp::ambient::{MARGIN_GOAL_DB, MAX_LEVEL_SPL, MIN_LEVEL_SPL};
+    let l = &app.level;
+    let [info, noise, suggestion] = Layout::vertical([
+        Constraint::Length(6),
+        Constraint::Length(8),
+        Constraint::Min(10),
+    ])
+    .areas(area);
+    let intro = vec![
+        Line::from(Span::styled(
+            "Keep quiet for a few seconds: CorrectSound is listening to your room.",
+            Style::default().bold(),
+        )),
+        Line::from(format!(
+            "Its background noise decides how loud the measurement has to be: every octave \
+             should end up {MARGIN_GOAL_DB:.0} dB above it. A quiet room can be measured \
+             quietly, at {MIN_LEVEL_SPL:.0} dB; a noisy one needs up to {MAX_LEVEL_SPL:.0}. \
+             The suggestion follows the room as long as you listen."
+        )),
+        Line::from(
+            "Put the mic where your head is when listening, at ear height, pointing as chosen in step 2.",
+        ),
+    ];
+    frame.render_widget(
+        Paragraph::new(intro)
+            .block(panel("Listen to the room"))
+            .wrap(Wrap { trim: true }),
+        info,
+    );
+
+    let mut rows = Vec::new();
+    match (&l.room_noise, &l.suggestion) {
+        (Some(n), Some(s)) => {
+            // Bars from 0 to 70 dB SPL.
+            let bar_width = 24usize;
+            for g in &NOISE_GROUPS {
+                let level = group_level(n, g);
+                let needs = s.needs[g.octaves.clone()]
+                    .iter()
+                    .flatten()
+                    .copied()
+                    .fold(f64::NEG_INFINITY, f64::max);
+                let (word, color) = level_verdict(needs);
+                let filled = ((level / 70.0).clamp(0.0, 1.0) * bar_width as f64).round() as usize;
+                rows.push(Line::from(vec![
+                    Span::styled(format!("{:<6}", g.name), Style::default().bold()),
+                    Span::raw(format!("{:<15}", g.range)),
+                    Span::raw(format!("{level:>4.0} dB SPL  ")),
+                    Span::styled("█".repeat(filled), Style::default().fg(color)),
+                    Span::styled(
+                        "░".repeat(bar_width - filled),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                    Span::styled(format!("  {word:<11}"), Style::default().fg(color)),
+                    Span::styled(g.sources, Style::default().fg(Color::DarkGray)),
+                ]));
+            }
+            rows.push(Line::from(""));
+            rows.push(Line::from(Span::styled(
+                "Levels are the steady background over the last 3 seconds; a cough or a car \
+                 passing does not count.",
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+        _ => rows.push(Line::from(format!("Listening… {:.1} s", l.listened_secs()))),
+    }
+    frame.render_widget(
+        Paragraph::new(rows)
+            .block(panel("Background noise"))
+            .wrap(Wrap { trim: false }),
+        noise,
+    );
+
+    let mut lines = Vec::new();
+    if let Some(s) = &l.suggestion {
+        let color = level_verdict(s.level_spl).1;
+        let color = if color == Color::Red {
+            Color::LightRed
+        } else {
+            color
+        };
+        lines.extend(bignum::lines(
+            &format!("{:.0}", s.level_spl),
+            Style::default().fg(color),
+        ));
+        lines.push(Line::from(Span::styled(
+            "dB SPL",
+            Style::default().fg(color),
+        )));
+        lines.push(Line::from(""));
+        let octave = if s.limited_by_hz < 1000.0 {
+            format!("{:.0} Hz", s.limited_by_hz)
+        } else {
+            format!("{:.0} kHz", s.limited_by_hz / 1000.0)
+        };
+        lines.push(Line::from(if s.too_noisy {
+            warn(&format!(
+                "The room needs more than {MAX_LEVEL_SPL:.0} dB, most of all around {octave}. \
+                 Measure at a quieter moment, or switch off what hums (ventilation, a fridge); \
+                 measuring now may be rejected as too noisy."
+            ))
+        } else if s.level_spl <= MIN_LEVEL_SPL {
+            ok(&format!(
+                "A quiet room: {MIN_LEVEL_SPL:.0} dB is enough everywhere, and comfortable."
+            ))
+        } else {
+            Span::raw(format!(
+                "Set by the background around {octave}: that octave needs the loudest \
+                 measurement."
+            ))
+        }));
+        lines.push(Line::from(Span::styled(
+            "Enter plays the noise; then turn the amplifier until the meter reads this.",
+            Style::default().bold(),
+        )));
+    }
+    let pad = usize::from(suggestion.height.saturating_sub(2)).saturating_sub(lines.len()) / 2;
+    lines.splice(0..0, std::iter::repeat_n(Line::from(""), pad));
+    frame.render_widget(
+        Paragraph::new(lines)
+            .alignment(Alignment::Center)
+            .wrap(Wrap { trim: true })
+            .block(panel("Measure at")),
+        suggestion,
     );
 }
 

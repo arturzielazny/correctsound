@@ -43,10 +43,30 @@ fn main() {
     shots.take(&app, "3-mic-gain");
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
+    // Listening to the room, then the noise at the level it calls for.
+    tick_until(&mut app, |a| a.level.listened_secs() >= 3.0);
+    shots.take(&app, "4a-listening");
+    press(&mut app, KeyCode::Enter);
     tick_until(&mut app, |a| {
         a.level.phase == LevelPhase::Playing && a.level.heard[0].is_some() && !a.level.fading_in()
     });
     wait(&mut app, 1500);
+    // Turn the (simulated) amplifier to the room's level, as a user would.
+    for _ in 0..40 {
+        let over = app.level.spl.unwrap_or(0.0) - app.level.target_spl;
+        if over.abs() < 0.7 {
+            break;
+        }
+        press(
+            &mut app,
+            if over > 0.0 {
+                KeyCode::Down
+            } else {
+                KeyCode::Up
+            },
+        );
+        wait(&mut app, 1200);
+    }
     shots.take(&app, "4-level");
     press(&mut app, KeyCode::Tab);
     tick_until(&mut app, |a| a.level.heard[1].is_some());

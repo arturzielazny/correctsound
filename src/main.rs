@@ -440,6 +440,8 @@ fn fit(
         analyses: [&l_runs, &r_runs],
         design: &d,
         ambient_spl: info.ambient_spl,
+        level_spl: info.room_noise_spl.as_ref().and(info.level_spl),
+        bass_noise_spl: info.room_noise_spl.as_ref().and_then(|n| n.get(1).copied()),
     });
     let report = format!(
         "{}\n{}",

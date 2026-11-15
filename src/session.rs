@@ -26,6 +26,13 @@ pub struct SessionInfo {
     /// Background noise from the level step, dB SPL in its 500–2000 Hz band.
     #[serde(default)]
     pub ambient_spl: Option<f64>,
+    /// The level the amplifier was set to, dB SPL on the level step's meter (sessions from
+    /// before it was worked out from the room: 75).
+    #[serde(default)]
+    pub level_spl: Option<f64>,
+    /// The room's background noise per octave ([`crate::dsp::ambient::OCTAVES`]), dB SPL.
+    #[serde(default)]
+    pub room_noise_spl: Option<Vec<f64>>,
 }
 
 /// A session directory.

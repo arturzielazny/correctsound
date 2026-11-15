@@ -33,6 +33,10 @@ pub struct Inputs<'a> {
     pub design: &'a Design,
     /// Background noise in the level step's band (500–2000 Hz), dB SPL.
     pub ambient_spl: Option<f64>,
+    /// The measurement level the room called for, dB SPL, and the background in the
+    /// 63 Hz octave, dB SPL.
+    pub level_spl: Option<f64>,
+    pub bass_noise_spl: Option<f64>,
 }
 
 /// A local maximum or minimum relative to the octave-averaged response.
@@ -410,6 +414,26 @@ pub fn insights(inp: &Inputs<'_>) -> Vec<Section> {
             } else {
                 "noticeable; it limits how quietly you can listen"
             }
+        ));
+    }
+    if let Some(b) = inp.bass_noise_spl {
+        room.push(format!(
+            "Background in the bass (63 Hz octave): {b:.0} dB SPL ({}). Traffic, ventilation \
+             and fridges are loudest there, so it usually decides how loud the measurement \
+             must be.",
+            if b < 30.0 {
+                "quiet"
+            } else if b < 40.0 {
+                "some rumble"
+            } else {
+                "a lot of rumble"
+            }
+        ));
+    }
+    if let Some(l) = inp.level_spl {
+        room.push(format!(
+            "Measured at {l:.0} dB SPL on the level meter, the quietest level that keeps every \
+             octave about 30 dB above this room's background."
         ));
     }
     sections.push(Section {

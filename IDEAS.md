@@ -99,6 +99,10 @@ is that every port adds a module under `src/platform/` and leaves the rest alone
 - **Continuous live mode** (placement): periodic bass noise instead of sweeps, the
   curve recomputed every 0.1 s and following a change in about 0.6 s; and a waterfall with
   ringing times beside each sweep in sweeps mode.
+- **Measurement level from the room** (level step): listens to the background per
+  octave and suggests the quietest level that keeps every octave 30 dB above it (60–80 dB
+  SPL instead of a fixed 75), from a margin model checked on 30 real captures. The
+  per-octave check now measures the bass noise after the room has stopped ringing.
 - **Fast sweeps** (placement, `m` cycles the modes): a 1 s sweep looped without pauses and
   deconvolved circularly, curve and waterfall every 0.2 s. A big evenness number for
   reading across the room, and the most even curve so far kept in faded green.

@@ -81,10 +81,7 @@ nav.top .gh { padding: 6px 14px; border: 1px solid var(--line); border-radius: 9
 .os-note { margin: 10px 0 0; font-size: .92rem; color: var(--muted); }
 .yes { color: var(--green); font-weight: 600; }
 .no { color: var(--muted); }
-.shot { border-radius: var(--radius); border: 1px solid var(--line); overflow: hidden; background: var(--bg-2); box-shadow: 0 30px 80px -30px rgba(0,0,0,.8), 0 0 0 1px rgba(255,255,255,.02); }
-.shot .bar { display: flex; gap: 7px; padding: 10px 14px; background: var(--panel); border-bottom: 1px solid var(--line); }
-.shot .bar i { width: 11px; height: 11px; border-radius: 50%; background: var(--line); display: block; }
-.shot .bar i:nth-child(1) { background: #f7768e; } .shot .bar i:nth-child(2) { background: #e0af68; } .shot .bar i:nth-child(3) { background: #9ece6a; }
+.shot { border-radius: 0; border: 1px solid var(--line); overflow: hidden; background: var(--bg-2); box-shadow: 0 30px 80px -30px rgba(0,0,0,.8), 0 0 0 1px rgba(255,255,255,.02); }
 .shot img { display: block; width: 100%; height: auto; }
 .hero .shot { margin-top: 44px; }
 figure { margin: 0; }
@@ -180,7 +177,7 @@ pre { background: var(--bg-2); border: 1px solid var(--line); border-radius: 10p
 .gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 @media (max-width: 900px) { .gallery { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 560px) { .gallery { grid-template-columns: 1fr; } }
-.gallery a { display: block; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); }
+.gallery a { display: block; border-radius: 0; overflow: hidden; border: 1px solid var(--line); }
 .gallery img { width: 100%; display: block; }
 .gallery span { display: block; font-size: .88rem; padding: 8px 10px; background: var(--panel); color: var(--fg-2); }
 
@@ -192,7 +189,7 @@ th { color: var(--fg); }
 footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--muted); font-size: .92rem; }
 .lightbox { position: fixed; inset: 0; background: rgba(10,10,16,.92); display: none; align-items: center; justify-content: center; z-index: 50; padding: 20px; cursor: zoom-out; }
 .lightbox.on { display: flex; }
-.lightbox img { max-width: 100%; max-height: 100%; border-radius: 10px; }
+.lightbox img { max-width: 100%; max-height: 100%; }
 </style>
 </head>
 <body>
@@ -225,7 +222,6 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
     <div class="install"><span class="prompt">$</span> cargo install --git https://github.com/arturzielazny/correctsound &amp;&amp; correctsound --simulate</div>
     <p class="os-note">The simulator tour runs on Linux, macOS and Windows. Measuring real speakers works on Linux today; <a href="#where">what works where</a>.</p>
     <figure class="shot">
-      <div class="bar"><i></i><i></i><i></i></div>
       <img src="img/6-result.png" alt="The result screen: the measured response (orange), the target (dashed green) and the predicted result (blue), above the equalizer's curve and a list of filters" width="1800" height="1144">
     </figure>
     <figcaption>The result screen, running on the built-in simulator. Orange is what the mic heard, blue is what you will hear with the correction, and the lower chart is the equalizer itself.</figcaption>
@@ -241,7 +237,7 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
       <div class="card">
         <div class="icon" style="background:rgba(125,207,255,.12)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7dcfff" stroke-width="2"><path d="M3 12h3l3-8 4 16 3-8h5"/></svg></div>
         <h3>Measures properly</h3>
-        <p>Exponential sweeps, calibrated with your mic's own file, at a repeatable 75 dB, with signal-to-noise checked per octave. Several mic positions are averaged.</p>
+        <p>Exponential sweeps, calibrated with your mic's own file, at the quietest level your room's background noise allows (often 60 dB), with signal-to-noise checked per octave. Several mic positions are averaged.</p>
       </div>
       <div class="card">
         <div class="icon" style="background:rgba(158,206,106,.12)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9ece6a" stroke-width="2"><path d="M4 18c3-9 5-9 8 0s5 9 8 0"/></svg></div>
@@ -391,7 +387,7 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
           <h3>Devices</h3>
           <p>Finds the UMIK-1 and lists your outputs, with the one EasyEffects plays to already selected. It warns about apps that are playing, and pauses EasyEffects while measuring so the bare speakers are measured. Everything it changes is put back when it exits, even after a crash or a closed terminal.</p>
         </div>
-        <figure class="shot zoom"><div class="bar"><i></i><i></i><i></i></div><img loading="lazy" src="img/1-devices.png" alt="Devices screen: mic found, EasyEffects running, output list"></figure>
+        <figure class="shot zoom"><img loading="lazy" src="img/1-devices.png" alt="Devices screen: mic found, EasyEffects running, output list"></figure>
       </div>
       <div class="step">
         <div class="text">
@@ -399,15 +395,15 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
           <h3>Calibration and mic gain</h3>
           <p>Type the serial printed on your mic, and its personal calibration file is downloaded from miniDSP and cached. Then the mic's input volume is set to exactly 1.0 in PipeWire and ALSA, because the calibration assumes nothing amplifies the signal on the way in.</p>
         </div>
-        <figure class="shot zoom"><div class="bar"><i></i><i></i><i></i></div><img loading="lazy" src="img/3-mic-gain.png" alt="Mic gain screen offering to set input volume to unity"></figure>
+        <figure class="shot zoom"><img loading="lazy" src="img/3-mic-gain.png" alt="Mic gain screen offering to set input volume to unity"></figure>
       </div>
       <div class="step">
         <div class="text">
           <div class="num">4</div>
           <h3>Level</h3>
-          <p>First two seconds of silence measure your room's background noise. Then pink noise plays from one speaker and you turn the amplifier until the meter shows 75 dB. The level is repeatable, loud enough to be far above the noise, and gentle enough for small speakers. Above 95 dB it stops by itself.</p>
+          <p>Keep quiet for a few seconds while CorrectSound listens to your room. You see the background noise in the bass, the mids and the highs, live, and the level the measurement needs to stay 30 dB above it in every octave. Traffic and ventilation rumble in the bass, so that is usually what decides. A quiet room is measured at a comfortable 60 dB; a noisy one asks for up to 80, or for a quieter moment. Then press Enter: pink noise plays from one speaker and you turn the amplifier until the meter shows that level. Above 95 dB it stops by itself.</p>
         </div>
-        <figure class="shot zoom"><div class="bar"><i></i><i></i><i></i></div><img loading="lazy" src="img/4-level.png" alt="Level meter at 75.9 dB SPL, marked good"></figure>
+        <figure class="shot zoom"><img loading="lazy" src="img/4a-listening.png" alt="Listening to the room: background noise in bass, mids and highs, and a suggested measurement level of 68 dB SPL"></figure>
       </div>
       <div class="step">
         <div class="text">
@@ -415,7 +411,7 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
           <h3>Measure</h3>
           <p>A 5.5-second sweep plays from each speaker. Each recording is checked for clipping, for a missing sweep and for noise in every octave, and redone if needed. Moving the mic 20–30 cm and pressing <kbd>a</kbd> adds a position: the room sounds different a hand's width away, and averaging keeps only what is common to all of them.</p>
         </div>
-        <figure class="shot zoom"><div class="bar"><i></i><i></i><i></i></div><img loading="lazy" src="img/5-measured.png" alt="Measured left and right responses"></figure>
+        <figure class="shot zoom"><img loading="lazy" src="img/5-measured.png" alt="Measured left and right responses"></figure>
       </div>
       <div class="step">
         <div class="text">
@@ -423,7 +419,7 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
           <h3>Result</h3>
           <p>The measurement, the target and the predicted result, with the equalizer drawn below: every filter on its own (cuts in red, boosts in green) and the whole thing. How many filters and how high to correct are chosen automatically; <kbd>t</kbd>, <kbd>h</kbd> and <kbd>f</kbd> override them and the design updates instantly.</p>
         </div>
-        <figure class="shot zoom"><div class="bar"><i></i><i></i><i></i></div><img loading="lazy" src="img/6-result.png" alt="Result screen with response and equalizer charts"></figure>
+        <figure class="shot zoom"><img loading="lazy" src="img/6-result.png" alt="Result screen with response and equalizer charts"></figure>
       </div>
       <div class="step">
         <div class="text">
@@ -431,7 +427,7 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
           <h3>Save, apply, verify</h3>
           <p><kbd>a</kbd> backs up your EasyEffects settings, installs the preset as <code>CoSo-001-DDMMYYYY</code>, loads it and makes it load automatically for that output. <kbd>v</kbd> plays the sweeps again, this time through EasyEffects, and compares the result with the prediction: the purple line should sit on the blue one.</p>
         </div>
-        <figure class="shot zoom"><div class="bar"><i></i><i></i><i></i></div><img loading="lazy" src="img/7-saved-verified.png" alt="Save screen showing the preset loaded and the verification matching within 0.1 dB"></figure>
+        <figure class="shot zoom"><img loading="lazy" src="img/7-saved-verified.png" alt="Save screen showing the preset loaded and the verification matching within 0.1 dB"></figure>
       </div>
     </div>
   </div>
@@ -520,18 +516,18 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
           <div class="note green">The same loop works for anything that moves: speakers closer to or further from the wall, the desk, your chair. And it is honest about what doesn't help: thin foam panels barely touch the bass, and the chart shows that before you buy more of them.</div>
         </div>
         <div>
-          <figure class="shot zoom"><div class="bar"><i></i><i></i><i></i></div><img loading="lazy" src="img/5b-placement.png" alt="Placement screen in sweeps mode: the bass at two speaker positions, and a waterfall of how the bass fades"></figure>
+          <figure class="shot zoom"><img loading="lazy" src="img/5b-placement.png" alt="Placement screen in sweeps mode: the bass at two speaker positions, and a waterfall of how the bass fades"></figure>
           <figcaption>Sweeps mode, on the simulator. The simulated speakers were pinned 40 cm from the wall behind them (dashed): its reflection cancels a band around 170 Hz. Moved to 60 cm, the dip shrinks and the score improves by 1.1 dB. No equalizer can do that. The waterfall shows how the latest sweep's bass fades.</figcaption>
-          <figure class="shot zoom" style="margin-top:22px"><div class="bar"><i></i><i></i><i></i></div><img loading="lazy" src="img/5c-live.png" alt="Placement screen in live mode: the bass from continuous noise, against the pinned sweep"></figure>
+          <figure class="shot zoom" style="margin-top:22px"><img loading="lazy" src="img/5c-live.png" alt="Placement screen in live mode: the bass from continuous noise, against the pinned sweep"></figure>
           <figcaption>Live mode, same room: the curve from continuous noise, updated ten times a second. In the simulator it matches the sweep at the same position within 0.2 dB.</figcaption>
-          <figure class="shot zoom" style="margin-top:22px"><div class="bar"><i></i><i></i><i></i></div><img loading="lazy" src="img/5d-fast.png" alt="Placement screen in fast-sweeps mode: a worse placement, the best one so far in faded green, and a big number saying it is 1.1 dB less even than pinned"></figure>
+          <figure class="shot zoom" style="margin-top:22px"><img loading="lazy" src="img/5d-fast.png" alt="Placement screen in fast-sweeps mode: a worse placement, the best one so far in faded green, and a big number saying it is 1.1 dB less even than pinned"></figure>
           <figcaption>Fast sweeps, with the speakers moved on to 90 cm: worse again. The big number turns red, and the faded green curve keeps the best placement so far (60 cm).</figcaption>
         </div>
       </div>
     </div>
 
     <div class="two" style="margin-top:54px">
-      <figure class="shot zoom"><div class="bar"><i></i><i></i><i></i></div><img loading="lazy" src="img/6c-decay.png" alt="Waterfall of the bass decay, with 97 Hz marked as ringing longest"></figure>
+      <figure class="shot zoom"><img loading="lazy" src="img/6c-decay.png" alt="Waterfall of the bass decay, with 97 Hz marked as ringing longest"></figure>
       <div>
         <h3 style="margin-top:0">Decay waterfall <kbd>w</kbd></h3>
         <p>How each bass note fades after the sound stops. The back slice is the sound as it starts; each slice in front is 20 ms later. Most notes vanish within a few slices; a resonance stands out as a ridge that runs all the way to the front.</p>
@@ -558,7 +554,7 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
         </ul>
         <p class="muted">All of it is also written to <code>report.txt</code> in the session folder.</p>
       </div>
-      <figure class="shot zoom"><div class="bar"><i></i><i></i><i></i></div><img loading="lazy" src="img/6b-curiosities.png" alt="Curiosities screen listing room resonances, dimensions, reverberation and reflections"></figure>
+      <figure class="shot zoom"><img loading="lazy" src="img/6b-curiosities.png" alt="Curiosities screen listing room resonances, dimensions, reverberation and reflections"></figure>
     </div>
   </div>
 </section>
@@ -801,6 +797,7 @@ and how you would test it on the simulator. Wait for my go-ahead before writing 
     <div class="eyebrow">All screens</div>
     <h2>Gallery</h2>
     <div class="gallery">
+      <a class="zoom" href="img/4-level.png"><img loading="lazy" src="img/4-level.png" alt="Level meter"><span>Setting the level</span></a>
       <a class="zoom" href="img/5a-sweeping.png"><img loading="lazy" src="img/5a-sweeping.png" alt="Sweep in progress"><span>A sweep in progress</span></a>
       <a class="zoom" href="img/5-measured.png"><img loading="lazy" src="img/5-measured.png" alt="Measured responses"><span>Both speakers measured</span></a>
       <a class="zoom" href="img/6-result.png"><img loading="lazy" src="img/6-result.png" alt="Result"><span>Result and equalizer</span></a>
@@ -855,7 +852,7 @@ correctsound review          # open the newest again, re-analysed, nothing playe
     <div class="eyebrow">FAQ</div>
     <h2>Questions</h2>
     <h3>Is it safe for my speakers and my ears?</h3>
-    <p>The test sounds play at a level you set to 75 dB, and the level step stops by itself above 95 dB. The equalizer never adds net gain: a preamp lowers everything by the largest boost, so it can't clip. Boosts are limited, and nothing is boosted below your speakers' bass limit.</p>
+    <p>The test sounds play at the level the room needs, 60–80 dB, and the level step stops by itself above 95 dB. The equalizer never adds net gain: a preamp lowers everything by the largest boost, so it can't clip. Boosts are limited, and nothing is boosted below your speakers' bass limit.</p>
     <h3>What does it change on my system?</h3>
     <p>While running: it pauses EasyEffects, sets the mic's input volume to unity and may change the output volume if you ask. All of that is restored on exit, including on errors, signals and a closed terminal. When you apply, it backs up EasyEffects' settings into the session folder before installing the preset.</p>
     <h3>Left and right separately?</h3>

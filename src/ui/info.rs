@@ -48,7 +48,11 @@ fn simple_lines() -> Vec<Line<'static>> {
            miniDSP, removes the mic's colouring.",
         ),
         p("3 Mic gain: the calibration assumes the mic signal is not amplified; this checks it."),
-        p("4 Level: pink noise sets a repeatable loudness (75 dB), well above the room's noise."),
+        p(
+            "4 Level: first CorrectSound listens to the room's background noise and works out \
+           how loud the measurement must be to stay well above it, often only 60 dB. Then pink \
+           noise plays while you turn the amplifier to that level.",
+        ),
         p(
             "5 Measure: a sweep, a tone gliding from 10 Hz to 22 kHz, plays from each speaker. \
            From the recording the app computes how loud every frequency arrives. Measuring a \
@@ -153,10 +157,23 @@ fn technical_lines() -> Vec<Line<'static>> {
             "Clipping above −1 dBFS fails the sweep. The impulse response's peak-to-noise ratio \
            must exceed 25 dB. Per octave from 63 Hz to 8 kHz, the response is compared with \
            the noise in a later stretch of the same impulse response (same window), which is \
-           exactly the noise that ends up in the curve: under 20 dB asks for a retake. The \
-           level meter counts only the test noise's band (500–2000 Hz, 4th-order band-pass), \
-           so infrasonic rumble does not inflate it; ambient noise is the median of 100 ms \
-           blocks.",
+           exactly the noise that ends up in the curve: under 20 dB asks for a retake. For the \
+           octaves below 300 Hz that stretch starts 2 s after the direct sound, when the room \
+           has stopped ringing (a 50 Hz mode can still be 40 dB up at 0.6 s), so the margin is \
+           the background's and not the room's own decay; above, it starts at 0.7 s, because \
+           for the treble the IR there is made from the end of the recording. The level meter \
+           counts only the test noise's band (500–2000 Hz, 4th-order band-pass), so \
+           infrasonic rumble does not inflate it.",
+        ),
+        p(
+            "Measurement level: while listening, the background is analysed per octave (0.5 s \
+           Hann blocks every 0.25 s, the median of the last 3 s). For the log sweep, each \
+           octave's margin is the meter level + the speaker's level in that octave relative \
+           to the meter's band − the background in the octave + 6 dB (6 ± 2 dB on 30 real \
+           captures, and within 1 dB on a synthetic room in the tests). The suggestion is the \
+           quietest level giving every octave from 63 Hz to 8 kHz 30 dB, assuming the speaker \
+           6 dB weak at 63 Hz and 3 dB elsewhere, kept within 60–80 dB SPL. It goes up at \
+           once and down only by 2 dB or more, so it does not flicker.",
         ),
         gap(),
         h("Averaging and smoothing"),

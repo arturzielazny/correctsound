@@ -39,7 +39,7 @@ correctsound
 | 1 Devices | Finds the UMIK-1 and your outputs (the one EasyEffects plays to is preselected). EasyEffects is bypassed while measuring. |
 | 2 Calibration | Type the mic's serial; its calibration file is downloaded from miniDSP and cached. Choose 0° (mic points at the speakers) or 90° (points at the ceiling). |
 | 3 Mic gain | Sets the mic's PipeWire volume and ALSA capture control to unity, which the calibration assumes. |
-| 4 Level | Pink noise plays from one speaker; turn the amplifier until the meter shows 75 dB (or use ↑/↓). Tab switches speakers. |
+| 4 Level | Keep quiet for a few seconds: the room's background noise is shown for bass, mids and highs, and decides how loud the measurement must be (60–80 dB; a quiet room gets 60). Enter plays pink noise from one speaker; turn the amplifier until the meter shows that level (or use ↑/↓). Tab switches speakers, `l` listens again. |
 | 5 Measure | A 5.5 s sweep from each speaker. Optionally move the mic 20–30 cm and press `a` to add positions; they are averaged. `p` opens live placement. |
 | 6 Result | Measured, target and predicted response, the equalizer's curve (each filter and the whole), and the filter list. High limit and filter count are chosen automatically; `t/T` tilt, `h` high limit, `f/F` filter count, `d` back to automatic. |
 | 7 Save | Writes the files; `a` loads them into EasyEffects (after backing up its settings), `v` re-measures through EasyEffects to verify. |

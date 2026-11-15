@@ -1,4 +1,6 @@
-//! Step 4: ambient noise, then pink noise per channel with a live SPL meter.
+//! Step 4: listening to the room's background noise, which sets how loud the measurement
+//! needs to be ([`crate::dsp::ambient`]), then pink noise per channel with a live SPL meter
+//! for setting the amplifier to that level.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -6,12 +8,15 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 
 use crate::audio::{AudioBackend, Channel, Program, Route, Source, Stream};
+use crate::cal::Calibration;
 use crate::dsp::SAMPLE_RATE;
+use crate::dsp::ambient::{AmbientMeter, OCTAVES, OctaveLevels, Suggestion};
 use crate::dsp::level::{BandFilter, LevelMeter, SplScale, median_block_dbfs, rms_dbfs};
 use crate::dsp::noise::pink_band;
 
-/// Target level for the noise, dB SPL.
-pub const TARGET_SPL: f64 = 75.0;
+/// Level for the noise before the room has been listened to (sessions saved before the
+/// level was worked out from the room), dB SPL.
+pub const DEFAULT_TARGET_SPL: f64 = 75.0;
 /// Green zone half-width, dB.
 pub const TOLERANCE: f64 = 1.5;
 /// Playback stops above this, dB SPL.
@@ -21,8 +26,13 @@ pub const NOISE_DBFS: f64 = -20.0;
 /// Band of the test noise, Hz; the meter only counts this band (with an octave of margin).
 pub const NOISE_LOW_HZ: f64 = 500.0;
 pub const NOISE_HIGH_HZ: f64 = 2000.0;
-/// How long the ambient level is measured.
-const AMBIENT: Duration = Duration::from_secs(2);
+/// Recording skipped when listening starts, while the stream and filters settle.
+const LISTEN_SETTLE: usize = SAMPLE_RATE as usize * 3 / 10;
+/// Background kept for the level in the meter's band: the last 3 s.
+const AMBIENT_KEEP: usize = SAMPLE_RATE as usize * 3;
+/// The suggestion moves down only by this much at once, dB, so it does not flicker; it
+/// moves up at once, the safe direction.
+const SUGGESTION_HYSTERESIS_DB: f64 = 2.0;
 /// Fade-in for every noise start.
 const FADE_IN_SECONDS: usize = 3;
 
@@ -30,8 +40,8 @@ const FADE_IN_SECONDS: usize = 3;
 pub enum LevelPhase {
     /// Not started (or audio unavailable).
     Idle,
-    /// Measuring the room's background level.
-    Ambient,
+    /// Listening to the room's background noise, continuously.
+    Listening,
     /// Noise is playing.
     Playing,
     /// Playback stopped; the reason is shown.
@@ -42,6 +52,13 @@ pub enum LevelPhase {
 pub struct LevelState {
     pub channel: Channel,
     pub phase: LevelPhase,
+    /// The level to set, dB SPL: the room's suggestion, fixed when the noise starts.
+    pub target_spl: f64,
+    /// The room's background per octave ([`OCTAVES`]), dB SPL, corrected for the mic.
+    pub room_noise: Option<OctaveLevels>,
+    /// The measurement level the room's background calls for, while listening.
+    pub suggestion: Option<Suggestion>,
+    /// Background noise in the meter's band, dB SPL.
     pub ambient_spl: Option<f64>,
     /// Averaged SPL of the current noise.
     pub spl: Option<f64>,
@@ -50,6 +67,10 @@ pub struct LevelState {
     pub sink_volume: Option<f64>,
     stream: Option<Stream>,
     meter: LevelMeter,
+    listener: AmbientMeter,
+    /// Samples still to skip before listening counts.
+    settle: usize,
+    /// The last few seconds of background, filtered to the meter's band.
     ambient: Vec<f32>,
     started: Option<Instant>,
     noise: Arc<[f32]>,
@@ -73,12 +94,17 @@ impl LevelState {
         Self {
             channel: Channel::Left,
             phase: LevelPhase::Idle,
+            target_spl: DEFAULT_TARGET_SPL,
+            room_noise: None,
+            suggestion: None,
             ambient_spl: None,
             spl: None,
             heard: [None, None],
             sink_volume: None,
             stream: None,
             meter: LevelMeter::standard(SAMPLE_RATE),
+            listener: AmbientMeter::new(),
+            settle: 0,
             ambient: Vec::new(),
             started: None,
             noise: pink_band(SAMPLE_RATE, NOISE_LOW_HZ, NOISE_HIGH_HZ, NOISE_DBFS, 1).into(),
@@ -94,28 +120,60 @@ impl LevelState {
         self.spl = None;
     }
 
-    /// Starts recording the ambient level.
+    /// Starts listening to the room, until [`Self::start_noise`].
     ///
     /// # Errors
     ///
     /// Fails if the capture stream cannot start.
-    pub fn start_ambient(&mut self, audio: &mut dyn AudioBackend) -> Result<()> {
+    pub fn start_listening(&mut self, audio: &mut dyn AudioBackend) -> Result<()> {
         self.stop();
         self.ambient.clear();
         self.band.reset();
+        self.listener.reset();
+        self.room_noise = None;
+        self.suggestion = None;
+        self.settle = LISTEN_SETTLE;
         self.stream =
             Some(audio.start(Source::new(Program::Silence, self.channel), Route::Hardware)?);
         self.started = Some(Instant::now());
-        self.phase = LevelPhase::Ambient;
+        self.phase = LevelPhase::Listening;
         Ok(())
     }
 
-    /// Starts (or restarts) the noise on `channel`, fading in.
+    /// Seconds of the room heard so far while listening (up to 3).
+    #[must_use]
+    pub fn listened_secs(&self) -> f64 {
+        self.listener.heard_secs()
+    }
+
+    /// True when the noise may start: the room has been heard long enough for a
+    /// suggestion, or listening is over.
+    #[must_use]
+    pub fn can_play(&self) -> bool {
+        self.phase != LevelPhase::Listening || self.suggestion.is_some()
+    }
+
+    /// Starts (or restarts) the noise on `channel`, fading in. Coming from listening, the
+    /// suggested level becomes the target.
     ///
     /// # Errors
     ///
     /// Fails if the streams cannot start.
-    pub fn start_noise(&mut self, audio: &mut dyn AudioBackend, channel: Channel) -> Result<()> {
+    pub fn start_noise(
+        &mut self,
+        audio: &mut dyn AudioBackend,
+        channel: Channel,
+        scale: SplScale,
+    ) -> Result<()> {
+        if self.phase == LevelPhase::Listening {
+            if let Some(s) = self.suggestion {
+                self.target_spl = s.level_spl;
+            }
+            if !self.ambient.is_empty() {
+                let block = SAMPLE_RATE as usize / 10;
+                self.ambient_spl = Some(scale.spl(median_block_dbfs(&self.ambient, block)));
+            }
+        }
         self.stop();
         self.channel = channel;
         self.meter.reset();
@@ -134,7 +192,7 @@ impl LevelState {
     /// Stops any audio.
     pub fn stop(&mut self) {
         self.stream = None;
-        if matches!(self.phase, LevelPhase::Playing | LevelPhase::Ambient) {
+        if matches!(self.phase, LevelPhase::Playing | LevelPhase::Listening) {
             self.phase = LevelPhase::Idle;
         }
     }
@@ -148,29 +206,46 @@ impl LevelState {
                 .is_some_and(|t| t.elapsed() < Duration::from_secs(FADE_IN_SECONDS as u64 + 1))
     }
 
-    /// Processes captured audio. Returns true when the ambient measurement just finished.
-    pub fn tick(&mut self, scale: SplScale) -> bool {
+    /// Processes captured audio. `cal` corrects the room's noise levels for the mic.
+    pub fn tick(&mut self, scale: SplScale, cal: Option<&Calibration>) {
         let Some(stream) = &self.stream else {
-            return false;
+            return;
         };
         let samples = stream.drain();
         match self.phase {
-            LevelPhase::Ambient => {
-                let filtered = self.band.process(&samples);
+            LevelPhase::Listening => {
+                // The first moments, while the stream and filter settle, do not count.
+                let skip = self.settle.min(samples.len());
+                self.settle -= skip;
+                let samples = &samples[skip..];
+                let filtered = self.band.process(samples);
                 self.ambient.extend_from_slice(&filtered);
-                if self.started.is_some_and(|t| t.elapsed() >= AMBIENT) {
-                    // Skip the first 0.3 s, where the stream and filter may still be settling.
-                    let skip = (SAMPLE_RATE as usize * 3 / 10).min(self.ambient.len());
-                    let block = SAMPLE_RATE as usize / 10;
-                    let level = median_block_dbfs(&self.ambient[skip..], block);
-                    self.ambient_spl = Some(scale.spl(level));
-                    self.stream = None;
-                    return true;
+                if self.ambient.len() > AMBIENT_KEEP {
+                    self.ambient.drain(..self.ambient.len() - AMBIENT_KEEP);
+                }
+                self.listener.push(samples);
+                if let Some(dbfs) = self.listener.steady_dbfs() {
+                    let raw = dbfs.map(|d| scale.spl(d));
+                    let mut shown = raw;
+                    for (level, &f) in shown.iter_mut().zip(&OCTAVES) {
+                        *level -= cal.map_or(0.0, |c| c.db_at(f));
+                    }
+                    self.room_noise = Some(shown);
+                    // The margin is worked out on the raw recording, like the check after
+                    // each sweep, so the suggestion uses the uncorrected levels.
+                    let new = Suggestion::for_noise(&raw);
+                    let keep = self.suggestion.is_some_and(|old| {
+                        new.level_spl <= old.level_spl
+                            && new.level_spl > old.level_spl - SUGGESTION_HYSTERESIS_DB
+                    });
+                    if !keep {
+                        self.suggestion = Some(new);
+                    }
                 }
             }
             LevelPhase::Playing => {
                 if samples.is_empty() {
-                    return false;
+                    return;
                 }
                 // The safety limit uses the unfiltered level, which can only be higher.
                 let instant = scale.spl(rms_dbfs(&samples));
@@ -180,7 +255,7 @@ impl LevelState {
                         "Stopped: {instant:.0} dB SPL is above the {ABORT_SPL:.0} dB safety limit. \
                          Turn the amplifier down, then press Space."
                     ));
-                    return false;
+                    return;
                 }
                 self.meter.push(&self.band.process(&samples));
                 if let Some(db) = self.meter.dbfs() {
@@ -193,13 +268,13 @@ impl LevelState {
             }
             LevelPhase::Idle | LevelPhase::Stopped(_) => {}
         }
-        false
     }
 
-    /// True when the room's noise floor is within 25 dB of the target.
+    /// True when the room's noise in the meter's band is within 25 dB of the target, so
+    /// the meter reads it along with the noise.
     #[must_use]
     pub fn room_is_noisy(&self) -> bool {
-        self.ambient_spl.is_some_and(|a| a > TARGET_SPL - 25.0)
+        self.ambient_spl.is_some_and(|a| a > self.target_spl - 25.0)
     }
 }
 

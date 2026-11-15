@@ -82,7 +82,33 @@ fn full_wizard_on_simulator() {
     press(&mut app, KeyCode::Enter);
     assert_eq!(app.step, Step::Level);
 
-    tick_until(&mut app, "ambient + noise", Duration::from_secs(10), |a| {
+    // Listening to the room first: the simulated room rumbles a little in the bass, so the
+    // suggested level is a little above the floor and set by the 63 Hz octave.
+    assert_eq!(app.level.phase, LevelPhase::Listening);
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.level.phase, LevelPhase::Listening, "too early to play");
+    tick_until(
+        &mut app,
+        "a suggested level",
+        Duration::from_secs(10),
+        |a| a.level.suggestion.is_some(),
+    );
+    let suggestion = app.level.suggestion.expect("suggested");
+    eprintln!("suggested {suggestion:?}");
+    assert!(
+        (60.0..=70.0).contains(&suggestion.level_spl) && suggestion.limited_by_hz == 63.0,
+        "{suggestion:?}"
+    );
+    let noise = app.level.room_noise.expect("room heard");
+    assert!(noise[1] > noise[4] + 10.0, "rumble in the bass: {noise:?}");
+    let screen = render(&app);
+    assert!(
+        screen.contains("Keep quiet") && screen.contains("Bass") && screen.contains("dB SPL"),
+        "{screen}"
+    );
+    press(&mut app, KeyCode::Enter);
+    assert!((app.level.target_spl - suggestion.level_spl).abs() < 3.0);
+    tick_until(&mut app, "noise", Duration::from_secs(10), |a| {
         a.level.phase == LevelPhase::Playing && a.level.heard[0].is_some()
     });
     let ambient = app.level.ambient_spl.expect("ambient measured");
@@ -142,10 +168,14 @@ fn full_wizard_on_simulator() {
         .as_ref()
         .and_then(|p| p.latest.clone())
         .expect("reading");
-    // A wall 1 m behind cancels near 343 / 4 = 86 Hz; at 0.6 m it was near 143 Hz.
+    // Moving the speakers from 0.6 m to 1 m from the wall moves its cancellation dips
+    // (343 / 4d: 143 → 86 Hz, with others above): the whole bass is shaped differently.
+    // Compared by shape, not by where the deepest dip is, which can tip between two
+    // similar dips.
+    let moved = shape_difference(&now, &pinned);
     assert!(
-        (now.score.deepest.0 - pinned.score.deepest.0).abs() > 20.0,
-        "dip moved: {:?} → {:?}",
+        moved > 2.0,
+        "bass changed by {moved:.2} dB: {:?} → {:?}",
         pinned.score,
         now.score
     );

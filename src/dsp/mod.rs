@@ -1,5 +1,6 @@
 //! Signal processing: sweeps, noise, spectra, levels and filters.
 
+pub mod ambient;
 pub mod biquad;
 pub mod decay;
 pub mod level;

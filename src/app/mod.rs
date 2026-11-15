@@ -333,6 +333,9 @@ impl App {
         self.cal_path.clone_from(&info.calibration_file);
         self.cal = Some(cal);
         self.level.ambient_spl = info.ambient_spl;
+        if let Some(l) = info.level_spl {
+            self.level.target_spl = l;
+        }
         // The output it was measured on, for applying.
         self.options.sink = Some(info.sink.clone());
         self.poll_devices();
@@ -426,7 +429,7 @@ impl App {
                 let volume = self.current_sink_volume();
                 self.level.enter(volume);
                 if let Some(audio) = self.audio.as_mut()
-                    && let Err(e) = self.level.start_ambient(audio.as_mut())
+                    && let Err(e) = self.level.start_listening(audio.as_mut())
                 {
                     self.set_error(&e);
                 }
@@ -571,9 +574,7 @@ impl App {
             Step::Calibration => self.poll_download(),
             Step::Level => {
                 let scale = self.spl_scale();
-                if self.level.tick(scale) {
-                    self.level_ambient_done();
-                }
+                self.level.tick(scale, self.cal.as_ref());
             }
             Step::Measure if self.placement.is_some() => self.tick_placement(),
             Step::Measure | Step::Save => self.tick_measure(),
@@ -787,14 +788,31 @@ impl App {
     // ----- 4. level -----
 
     fn key_level(&mut self, code: KeyCode) {
+        let listening = self.level.phase == LevelPhase::Listening;
         match code {
-            KeyCode::Tab | KeyCode::Left | KeyCode::Right => {
+            // While listening, Enter or Space starts the noise at the suggested level.
+            KeyCode::Enter | KeyCode::Char(' ') if listening => {
+                if self.level.can_play() {
+                    let ch = self.level.channel;
+                    self.start_noise(ch);
+                } else {
+                    self.message = Some("Still listening to the room; a moment more.".into());
+                }
+            }
+            KeyCode::Tab | KeyCode::Left | KeyCode::Right if !listening => {
                 let ch = self.level.channel.other();
                 self.start_noise(ch);
             }
             KeyCode::Char(' ') => {
                 let ch = self.level.channel;
                 self.start_noise(ch);
+            }
+            KeyCode::Char('l') if !listening => {
+                if let Some(audio) = self.audio.as_mut()
+                    && let Err(e) = self.level.start_listening(audio.as_mut())
+                {
+                    self.set_error(&e);
+                }
             }
             KeyCode::Up | KeyCode::Down => {
                 let step = if code == KeyCode::Up { 0.02 } else { -0.02 };
@@ -821,18 +839,13 @@ impl App {
     }
 
     fn start_noise(&mut self, channel: Channel) {
+        let scale = self.spl_scale();
         let Some(audio) = self.audio.as_mut() else {
             return;
         };
-        if let Err(e) = self.level.start_noise(audio.as_mut(), channel) {
+        if let Err(e) = self.level.start_noise(audio.as_mut(), channel, scale) {
             self.set_error(&e);
         }
-    }
-
-    /// Called by the level state when ambient measurement completes.
-    fn level_ambient_done(&mut self) {
-        let ch = self.level.channel;
-        self.start_noise(ch);
     }
 
     // ----- 5. measure -----
@@ -1091,6 +1104,8 @@ impl App {
                 self.measure.positions[1].len(),
             ],
             ambient_spl: self.level.ambient_spl,
+            level_spl: Some(self.level.target_spl),
+            room_noise_spl: self.level.room_noise.map(|n| n.to_vec()),
         };
         let result = self.session().and_then(|s| s.save_info(&info));
         if let Err(e) = result {
@@ -1114,6 +1129,9 @@ impl App {
             analyses: [&self.measure.positions[0], &self.measure.positions[1]],
             design: &design,
             ambient_spl: self.level.ambient_spl,
+            // Only when the level was worked out from the room.
+            level_spl: self.level.room_noise.map(|_| self.level.target_spl),
+            bass_noise_spl: self.level.room_noise.map(|n| n[1]),
         });
         self.design = Some(design);
     }
