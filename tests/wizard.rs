@@ -157,9 +157,76 @@ fn full_wizard_on_simulator() {
     // Each sweep also measures how the bass decays.
     assert!(now.waterfall.is_some() && pinned.waterfall.is_some());
 
-    // Live mode: continuous noise, a new reading every tenth of a second.
-    press(&mut app, KeyCode::Char('l'));
+    // Fast sweeps: a sweep looping without pauses, a new reading every fifth of a second,
+    // each with the decay.
+    press(&mut app, KeyCode::Char('m'));
     let count = |a: &App| a.placement.as_ref().map_or(0, |p| p.count);
+    let latest = |a: &App| {
+        a.placement
+            .as_ref()
+            .and_then(|p| p.latest.clone())
+            .expect("a reading")
+    };
+    let seen = count(&app);
+    tick_until(&mut app, "fast sweeps", Duration::from_secs(30), |a| {
+        count(a) >= seen + 5
+    });
+    let fast = latest(&app);
+    assert_eq!(fast.mode, Mode::Fast);
+    assert!(fast.waterfall.is_some());
+    let (same, other) = (
+        shape_difference(&fast, &now),
+        shape_difference(&fast, &pinned),
+    );
+    eprintln!("fast at 1 m vs sweep at 1 m {same:.2} dB, vs sweep at 0.6 m {other:.2} dB");
+    assert!(same < other / 4.0, "{same} vs {other}");
+    // The big number and the best curve so far.
+    let screen = render(&app);
+    assert!(
+        screen.contains("Evenness") && screen.contains("█") && screen.contains("Fast sweeps"),
+        "{screen}"
+    );
+    let best = |a: &App| {
+        a.placement
+            .as_ref()
+            .and_then(|p| p.best[0].clone())
+            .expect("a best reading")
+    };
+    assert!(best(&app).score.evenness_db <= fast.score.evenness_db);
+    // Moving the wall while the sweep loops: the curve follows within about a second. Counted
+    // in updates (0.2 s of sound each while the app keeps up, fewer when it lags behind the
+    // simulator), so a slow test machine does not change the result.
+    app.tick();
+    for _ in 0..8 {
+        press(&mut app, KeyCode::Left);
+    }
+    let moved_at = count(&app);
+    tick_until(
+        &mut app,
+        "the fast curve to follow",
+        Duration::from_secs(30),
+        |a| {
+            a.placement
+                .as_ref()
+                .and_then(|p| p.latest.as_ref())
+                .is_some_and(|r| shape_difference(r, &pinned) < 1.0)
+        },
+    );
+    let updates = count(&app) - moved_at;
+    eprintln!("fast sweeps followed the move in {updates} updates");
+    // One sweep (five updates) plus the one under way.
+    assert!(updates <= 7, "{updates} updates");
+    // Back at 0.6 m, where the pin was: the best so far is the pinned reading or close.
+    tick_until(&mut app, "more fast sweeps", Duration::from_secs(30), |a| {
+        count(a) >= seen + 20
+    });
+    assert!(best(&app).score.evenness_db <= pinned.score.evenness_db + 1e-9);
+    for _ in 0..8 {
+        press(&mut app, KeyCode::Right);
+    }
+
+    // Live mode: continuous noise, a new reading every tenth of a second.
+    press(&mut app, KeyCode::Char('m'));
     let seen = count(&app);
     tick_until(&mut app, "live readings", Duration::from_secs(30), |a| {
         count(a) >= seen + 5
@@ -180,8 +247,7 @@ fn full_wizard_on_simulator() {
     eprintln!("live at 1 m vs sweep at 1 m {same:.2} dB, vs sweep at 0.6 m {other:.2} dB");
     assert!(same < other / 2.0, "{same} vs {other}");
     // Moving the wall while the noise plays: the dip follows within a few updates (0.1 s of
-    // sound each while the app keeps up, fewer when it lags behind the simulator), counted
-    // rather than timed so a slow test machine does not change the result.
+    // sound each, while the app keeps up).
     app.tick();
     for _ in 0..8 {
         press(&mut app, KeyCode::Left);

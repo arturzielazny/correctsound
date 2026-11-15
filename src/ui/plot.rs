@@ -83,6 +83,8 @@ pub enum Series {
     Eq,
     /// A pinned curve to compare against.
     Reference,
+    /// The best curve so far, faded behind the others.
+    Best,
     /// One time slice of a decay view, 0 (the start) to 5 (late).
     Slice(u8),
 }
@@ -110,6 +112,7 @@ impl Series {
             Self::Boost => Color::Green,
             Self::Eq => Color::White,
             Self::Reference => Color::Gray,
+            Self::Best => Color::Green,
             Self::Slice(k) => [
                 Color::Red,
                 Color::LightRed,
@@ -132,6 +135,7 @@ impl Series {
             Self::Boost => t.green,
             Self::Eq => t.foreground,
             Self::Reference => t.foreground,
+            Self::Best => t.green,
             Self::Slice(k) => time_color(t, f32::from(k) / 5.0),
         }
     }
@@ -149,6 +153,8 @@ impl Series {
             Self::Cut | Self::Boost => Pen::solid(color, 0.6, width * 0.6),
             Self::Eq => Pen::solid(color, 1.0, width * 1.1),
             Self::Reference => Pen::dashed(color, 0.6, width * 0.8, label_px * 0.5),
+            // Wide and faint: a band that shows where the curve was best.
+            Self::Best => Pen::solid(color, 0.3, width * 2.5),
             Self::Slice(_) => Pen::solid(color, 0.95, width * 0.9),
         }
     }
@@ -157,7 +163,7 @@ impl Series {
     fn layer(self) -> u8 {
         u8::from(!matches!(
             self,
-            Self::Target | Self::Cut | Self::Boost | Self::Reference
+            Self::Target | Self::Cut | Self::Boost | Self::Reference | Self::Best
         ))
     }
 }

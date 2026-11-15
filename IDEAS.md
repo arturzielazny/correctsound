@@ -96,9 +96,12 @@ is that every port adds a module under `src/platform/` and leaves the rest alone
 - **Live placement mode** (`p` on the measure step): short bass sweeps in a loop, an
   evenness score, and a pinned curve to compare against. In the simulator, ←/→ move the
   speakers relative to a wall.
-- **Continuous live mode** (`l` in placement): periodic bass noise instead of sweeps, the
+- **Continuous live mode** (placement): periodic bass noise instead of sweeps, the
   curve recomputed every 0.1 s and following a change in about 0.6 s; and a waterfall with
   ringing times beside each sweep in sweeps mode.
+- **Fast sweeps** (placement, `m` cycles the modes): a 1 s sweep looped without pauses and
+  deconvolved circularly, curve and waterfall every 0.2 s. A big evenness number for
+  reading across the room, and the most even curve so far kept in faded green.
 - **Decay (waterfall) view** (`w`): cumulative spectral decay of the bass, and the notes
   that ring longest, also listed in the curiosities and `report.txt`.
 

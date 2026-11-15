@@ -76,11 +76,18 @@ fn simple_lines() -> Vec<Line<'static>> {
            dips EQ cannot fill.",
         ),
         p(
-            "Two ways to measure, switched with l. Sweeps: a short sweep every couple of \
+            "Three ways to measure, switched with m. Sweeps: a short sweep every couple of \
            seconds, with fine detail and a waterfall of how the bass decays; bass traps show \
            best there, as notes that stop ringing sooner (keep still while a sweep plays). \
-           Live: a low rumble of noise plays without a break and the curve follows any change \
-           within about half a second, so you can watch it while you carry a trap.",
+           Fast sweeps: a one-second sweep over and over without pauses, the curve and the \
+           waterfall updated five times a second; a change shows within a second. Live: a \
+           low rumble of noise plays without a break and the curve follows any change within \
+           about half a second, so you can watch it while you carry a trap.",
+        ),
+        p(
+            "A big number beside the text says how much more even than the pinned reading the \
+           latest one is, readable from across the room. The most even reading so far stays \
+           on the chart as a faded green curve: where to put the trap back.",
         ),
         gap(),
         h("Decay (w)"),
@@ -242,7 +249,18 @@ fn technical_lines() -> Vec<Line<'static>> {
            does not matter. Recomputed from the latest period every 4800 recorded samples \
            (0.1 s), averaged half and half with the previous result, shown at 1/12 octave. \
            A change shows in about 0.6 s: one period plus the room's decay plus the average. \
-           The score is computed at 1/24 octave in both modes.",
+           The score is computed at 1/24 octave in every mode.",
+        ),
+        p(
+            "Fast sweeps: a logarithmic sweep, 10 Hz to 1 kHz, filling a period of 49152 \
+           samples (1.02 s) and looped, the jump at the loop point faded over 5 ms. The same \
+           periodic trick gives the impulse response by circular deconvolution, \
+           IFFT(Y·X*/|X|²) with a third-octave fade outside the band, from the latest period \
+           every 9600 recorded samples (0.2 s). It goes through the same window and waterfall \
+           as a single sweep. The period is as short as the waterfall allows: it needs 0.7 s \
+           after the direct sound, and the sweep's harmonic distortion wraps around to \
+           0.15 s before it. In the simulator it matches single sweeps exactly and shows a \
+           change in 1.3 s.",
         ),
         gap(),
         h("Decay"),

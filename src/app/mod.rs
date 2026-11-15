@@ -893,16 +893,20 @@ impl App {
             }
             KeyCode::Char(' ') => p.pin(),
             KeyCode::Tab => p.switch_channel(),
-            KeyCode::Char('l') => {
+            KeyCode::Char('m') => {
                 p.switch_mode();
                 self.message = Some(
                     match p.mode {
+                        placement::Mode::Sweeps => {
+                            "Sweeps: a sweep every couple of seconds, fine detail and the decay."
+                        }
+                        placement::Mode::Fast => {
+                            "Fast sweeps: a sweep every second without pauses, updated five times \
+                             a second, with the decay."
+                        }
                         placement::Mode::Live => {
                             "Live: bass noise plays continuously; the curve follows within half a \
-                         second."
-                        }
-                        placement::Mode::Sweeps => {
-                            "Sweeps: finer detail, and the waterfall shows how the bass decays."
+                             second."
                         }
                     }
                     .into(),

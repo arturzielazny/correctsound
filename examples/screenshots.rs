@@ -76,8 +76,27 @@ fn main() {
     });
     app.message = None;
     shots.take(&app, "5b-placement");
+    // Fast sweeps: a sweep looping without pauses; then a worse placement, so the best one
+    // so far shows faded behind it.
+    press(&mut app, KeyCode::Char('m'));
+    let seen = app.placement.as_ref().map_or(0, |p| p.count);
+    tick_until(&mut app, |a| {
+        a.placement.as_ref().is_some_and(|p| p.count >= seen + 5)
+    });
+    for _ in 0..6 {
+        press(&mut app, KeyCode::Right);
+    }
+    let seen = app.placement.as_ref().map_or(0, |p| p.count);
+    tick_until(&mut app, |a| {
+        a.placement.as_ref().is_some_and(|p| p.count >= seen + 10)
+    });
+    app.message = None;
+    shots.take(&app, "5d-fast");
+    for _ in 0..6 {
+        press(&mut app, KeyCode::Left);
+    }
     // Live mode: the same comparison, from noise, updated ten times a second.
-    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('m'));
     let seen = app.placement.as_ref().map_or(0, |p| p.count);
     tick_until(&mut app, |a| {
         a.placement.as_ref().is_some_and(|p| p.count >= seen + 15)

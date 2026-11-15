@@ -258,7 +258,7 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
       <div class="icon" style="background:rgba(158,206,106,.16);width:46px;height:46px;border-radius:12px;display:grid;place-items:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9ece6a" stroke-width="2" stroke-linejoin="round"><path d="M3 3h18v18H3z" opacity=".45"/><path d="M3 3l8 0-8 8z" fill="rgba(158,206,106,.35)"/><path d="M14 17c1.5-4 3-4 4.5 0"/></svg></div>
       <div>
         <h3>Guides room treatment, live</h3>
-        <p>EQ can't fix everything in the bass; the room can. Live placement re-measures ten times a second while you move a bass trap, a speaker or your chair, and sweeps show how long each bass note rings, so you see what each change does before you commit to it.</p>
+        <p>EQ can't fix everything in the bass; the room can. Live placement re-measures ten times a second while you move a bass trap, a speaker or your chair, and sweeps show how long each bass note rings, so you see what each change does before you commit to it. A big number readable from across the room says how much better it got, and the best curve so far stays on screen.</p>
       </div>
       <a class="btn" href="#treatment">See it</a>
     </div>
@@ -447,10 +447,13 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
       <h3 style="margin:0">Live placement and room treatment <kbd>p</kbd></h3>
       <p class="treat-lede">Walk around with a bass trap and <em>see what it does right away</em>.</p>
       <p>The bass at your seat is measured over and over, with one number for how uneven it is. Whatever changes the bass shows up straight away: a bass trap in a corner, a speaker 10 cm further from the wall, your chair moved forward. Pin one state with <kbd>Space</kbd> and compare everything else against it. Room treatment stops being guesswork and becomes a few minutes of trying.</p>
-      <div class="grid g2" style="margin-top:22px">
-        <div class="card"><h3><kbd>l</kbd> Live</h3><p>A low rumble of bass-only noise plays without a break, and the curve is recomputed ten times a second. It follows a change in about half a second, so you can watch it while you carry the trap around.</p></div>
-        <div class="card"><h3>Sweeps</h3><p>A short sweep every couple of seconds: finer detail, and a waterfall of how the bass decays. That is where bass traps show best, as notes that stop ringing sooner, with the ringing times compared with the pinned sweep.</p></div>
+      <p>Three ways to measure, switched with <kbd>m</kbd>:</p>
+      <div class="grid g3" style="margin-top:14px">
+        <div class="card"><h3>Live</h3><p>A low rumble of bass-only noise plays without a break, and the curve is recomputed ten times a second. It follows a change in about half a second, so you can watch it while you carry the trap around.</p></div>
+        <div class="card"><h3>Fast sweeps</h3><p>A one-second sweep over and over without pauses. The curve and the waterfall of how the bass decays are recomputed five times a second, so a change shows within a second, ringing included.</p></div>
+        <div class="card"><h3>Sweeps</h3><p>A short sweep every couple of seconds: fine detail and the waterfall, from a sweep with silence around it. Keep still while it plays, then read how much shorter each note rings than in the pinned sweep.</p></div>
       </div>
+      <p style="margin-top:18px">Whatever the mode, a <strong>big number</strong> says how many dB more even than the pinned state the bass is, large enough to read from the corner you're standing in, and the <strong>most even curve so far</strong> stays on the chart in faded green, so you know where to put the trap back.</p>
 
       <div class="diagram two" style="margin-bottom:8px;gap:20px">
         <svg viewBox="10 0 440 372" role="img" aria-label="Top view of a room: the mic stays at the seat while a bass trap is tried in each corner">
@@ -509,8 +512,8 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
           <ol class="howto">
             <li>Put the mic on its stand at your seat. It stays there the whole time. On the measure step, press <kbd>p</kbd>.</li>
             <li>Let a few sweeps run with the room as it is, then press <kbd>Space</kbd> to pin that curve. It is what everything else is compared with.</li>
-            <li>Press <kbd>l</kbd> for live mode and carry the bass trap from corner to corner, watching the curve against the pinned one. It follows within about half a second.</li>
-            <li>Where it looks best, put the trap down, press <kbd>l</kbd> again for sweeps and keep still while one plays: the score says how many dB more or less even it is, and the decay line which notes ring shorter than before. Try the wall behind the speakers, behind your seat, or two traps stacked.</li>
+            <li>Press <kbd>m</kbd> until it says live, and carry the bass trap from corner to corner, watching the big number and the curve against the pinned one. It follows within about half a second; the faded green curve marks the best spot so far.</li>
+            <li>Put the trap down where the number was highest and press <kbd>m</kbd> for sweeps (fast, or single for the finest detail): the decay line says which notes ring shorter than before. Try the wall behind the speakers, behind your seat, or two traps stacked.</li>
             <li>Leave the trap where it helped most. Then run the normal measurement, so the EQ corrects what is left.</li>
           </ol>
           <p style="margin-top:16px"><kbd>Tab</kbd> switches speakers, and <kbd>s</kbd> pauses the sound while you carry something heavy.</p>
@@ -521,6 +524,8 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
           <figcaption>Sweeps mode, on the simulator. The simulated speakers were pinned 40 cm from the wall behind them (dashed): its reflection cancels a band around 170 Hz. Moved to 60 cm, the dip shrinks and the score improves by 1.1 dB. No equalizer can do that. The waterfall shows how the latest sweep's bass fades.</figcaption>
           <figure class="shot zoom" style="margin-top:22px"><div class="bar"><i></i><i></i><i></i></div><img loading="lazy" src="img/5c-live.png" alt="Placement screen in live mode: the bass from continuous noise, against the pinned sweep"></figure>
           <figcaption>Live mode, same room: the curve from continuous noise, updated ten times a second. In the simulator it matches the sweep at the same position within 0.2 dB.</figcaption>
+          <figure class="shot zoom" style="margin-top:22px"><div class="bar"><i></i><i></i><i></i></div><img loading="lazy" src="img/5d-fast.png" alt="Placement screen in fast-sweeps mode: a worse placement, the best one so far in faded green, and a big number saying it is 1.1 dB less even than pinned"></figure>
+          <figcaption>Fast sweeps, with the speakers moved on to 90 cm: worse again. The big number turns red, and the faded green curve keeps the best placement so far (60 cm).</figcaption>
         </div>
       </div>
     </div>
@@ -800,6 +805,7 @@ and how you would test it on the simulator. Wait for my go-ahead before writing 
       <a class="zoom" href="img/5-measured.png"><img loading="lazy" src="img/5-measured.png" alt="Measured responses"><span>Both speakers measured</span></a>
       <a class="zoom" href="img/6-result.png"><img loading="lazy" src="img/6-result.png" alt="Result"><span>Result and equalizer</span></a>
       <a class="zoom" href="img/5b-placement.png"><img loading="lazy" src="img/5b-placement.png" alt="Placement, sweeps"><span>Placement: sweeps and decay</span></a>
+      <a class="zoom" href="img/5d-fast.png"><img loading="lazy" src="img/5d-fast.png" alt="Placement, fast sweeps"><span>Placement: fast sweeps</span></a>
       <a class="zoom" href="img/5c-live.png"><img loading="lazy" src="img/5c-live.png" alt="Placement, live"><span>Placement: live</span></a>
       <a class="zoom" href="img/6c-decay.png"><img loading="lazy" src="img/6c-decay.png" alt="Decay waterfall"><span>Decay waterfall</span></a>
       <a class="zoom" href="img/6b-curiosities.png"><img loading="lazy" src="img/6b-curiosities.png" alt="Curiosities"><span>Curiosities</span></a>
@@ -836,7 +842,7 @@ correctsound review          # open the newest again, re-analysed, nothing playe
       <tr><td><kbd>Enter</kbd></td><td>everywhere</td><td>the screen's main action</td></tr>
       <tr><td><kbd>a</kbd></td><td>measure / save</td><td>add a mic position / apply in EasyEffects</td></tr>
       <tr><td><kbd>p</kbd></td><td>measure</td><td>live placement and room treatment</td></tr>
-      <tr><td><kbd>l</kbd></td><td>placement</td><td>live noise or sweeps (with the decay)</td></tr>
+      <tr><td><kbd>m</kbd></td><td>placement</td><td>mode: sweeps, fast sweeps or live noise</td></tr>
       <tr><td><kbd>t</kbd> <kbd>h</kbd> <kbd>f</kbd> <kbd>d</kbd></td><td>result</td><td>tilt, high limit, filter count, back to automatic</td></tr>
       <tr><td><kbd>v</kbd></td><td>save</td><td>verify through EasyEffects</td></tr>
       <tr><td><kbd>c</kbd> <kbd>w</kbd> <kbd>i</kbd></td><td>after measuring</td><td>curiosities, decay waterfall, how it works</td></tr>

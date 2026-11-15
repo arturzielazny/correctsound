@@ -1,5 +1,6 @@
 //! Renders the wizard with ratatui.
 
+pub mod bignum;
 pub mod graphics;
 pub mod info;
 pub mod plot;
@@ -155,9 +156,9 @@ fn hints(app: &App) -> String {
     }
     if app.placement.is_some() {
         return if app.simulated() {
-            "Space pin / unpin   l live / sweeps   Tab speaker   s pause   ←/→ move the simulated speakers   Esc done"
+            "Space pin / unpin   m mode   Tab speaker   s pause   ←/→ move the simulated speakers   Esc done"
         } else {
-            "Space pin / unpin   l live / sweeps   Tab speaker   s pause   Esc done"
+            "Space pin / unpin   m mode (sweeps, fast, live)   Tab speaker   s pause   Esc done"
         }
         .to_owned();
     }
@@ -622,8 +623,9 @@ fn measure(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Graphics) {
     );
 }
 
-/// The placement screen: instructions, scores, the bass of the latest reading over the
-/// pinned one, and in sweeps mode how the bass decays.
+/// The placement screen: instructions, scores, a big number to read from across the room,
+/// the bass of the latest reading over the pinned and the best ones, and in the sweep modes
+/// how the bass decays.
 fn placement(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -633,25 +635,36 @@ fn placement(
 ) {
     use crate::app::placement::{Mode, SCORE_FROM_HZ, SCORE_TO_HZ, Score};
     let [status, plot_area] =
-        Layout::vertical([Constraint::Length(11), Constraint::Min(8)]).areas(area);
+        Layout::vertical([Constraint::Length(13), Constraint::Min(8)]).areas(area);
+    // The big number needs room; on a narrow terminal the text has it all.
+    let (text_area, big_area) = if status.width >= 110 {
+        let [a, b] =
+            Layout::horizontal([Constraint::Min(60), Constraint::Length(40)]).areas(status);
+        (a, Some(b))
+    } else {
+        (status, None)
+    };
     let intro = match p.mode {
         Mode::Sweeps => {
-            "Sweeps: a short bass sweep every couple of seconds while you move the speakers or \
-             your seat by 10–50 cm, or try a bass trap in each corner. The waterfall shows how \
-             the bass decays: traps shorten the ringing. l switches to live noise, which \
-             follows a change within half a second."
+            "Sweeps: a bass sweep every couple of seconds while you move the speakers or your \
+             seat by 10–50 cm, or try a bass trap in each corner. The waterfall shows how the \
+             bass decays: traps shorten the ringing."
+        }
+        Mode::Fast => {
+            "Fast sweeps: a one-second sweep loops without pauses; the curve and the waterfall \
+             are recomputed five times a second, so a change shows within a second, decay \
+             included."
         }
         Mode::Live => {
-            "Live: bass-only noise plays continuously and the curve is recomputed ten times a \
-             second from the latest third of a second, so it follows a bass trap as you carry \
-             it. l switches back to sweeps, for finer detail and the decay."
+            "Live: bass noise plays continuously and the curve is recomputed ten times a second, \
+             so it follows a bass trap as you carry it. Sweeps show finer detail and the decay."
         }
     };
     let mut lines = vec![
         Line::from(intro),
         Line::from(
-            "Pin a placement with Space, try another, keep the one with the smaller number. Lower \
-             is more even: it counts peaks and dips, not overall level.",
+            "Space pins a placement to compare with; keep the one with the smaller number (peaks \
+             and dips, not level). Faded green: the most even so far. m changes the mode.",
         ),
         Line::from(""),
     ];
@@ -661,6 +674,10 @@ fn placement(
         (Mode::Sweeps, false, true) => (
             format!("Sweep {}  ", p.count),
             format!("sweeping the {speaker} speaker…"),
+        ),
+        (Mode::Fast, false, true) => (
+            format!("Fast sweeps, {} updates  ", p.count),
+            format!("sweeping the {speaker} speaker in a loop"),
         ),
         (Mode::Live, false, true) => (
             format!("Live, {} updates  ", p.count),
@@ -690,22 +707,13 @@ fn placement(
             )),
             Span::styled(score_text(&r.score), Style::default().bold()),
         ];
-        if let Some(pinned) = &p.reference {
-            let delta = r.score.evenness_db - pinned.score.evenness_db;
-            let (text, color) = if delta < -0.3 {
-                (
-                    format!("  {:.1} dB more even than pinned", -delta),
-                    Color::Green,
-                )
-            } else if delta > 0.3 {
-                (
-                    format!("  {delta:.1} dB less even than pinned"),
-                    Color::LightRed,
-                )
-            } else {
-                ("  about the same as pinned".to_owned(), Color::Gray)
-            };
-            spans.push(Span::styled(text, Style::default().fg(color)));
+        // The comparison is in the big number when there is room for it.
+        if let Some(pinned) = p.reference.as_ref().filter(|_| big_area.is_none()) {
+            let (text, color) = compared(r.score.evenness_db, pinned.score.evenness_db);
+            spans.push(Span::styled(
+                format!("  {text}"),
+                Style::default().fg(color),
+            ));
         }
         lines.push(Line::from(spans));
     }
@@ -715,8 +723,32 @@ fn placement(
             Style::default().fg(Color::Gray),
         )));
     }
+    // The best so far, when it is clearly better than now and not the pinned one itself.
+    let best = p.best_other_than_latest().filter(|b| {
+        Some(*b) != p.reference.as_ref()
+            && p.latest
+                .as_ref()
+                .is_none_or(|l| b.score.evenness_db < l.score.evenness_db - SAME_DB)
+    });
+    if let Some(b) = best {
+        let mut text = format!(
+            "Best so far ({}): {}",
+            b.channel.name(),
+            score_text(&b.score)
+        );
+        if let Some(pinned) = p.reference.as_ref().filter(|_| big_area.is_none()) {
+            text = format!(
+                "{text}, {}",
+                compared(b.score.evenness_db, pinned.score.evenness_db).0
+            );
+        }
+        lines.push(Line::from(Span::styled(
+            text,
+            Style::default().fg(Series::Best.color(gfx)),
+        )));
+    }
     let latest_decay = p.latest.as_ref().and_then(|r| r.waterfall.as_ref());
-    if p.mode == Mode::Sweeps
+    if p.mode != Mode::Live
         && let Some(w) = latest_decay
     {
         lines.push(decay_line(
@@ -731,9 +763,20 @@ fn placement(
         Paragraph::new(lines)
             .block(panel("Placement"))
             .wrap(Wrap { trim: true }),
-        status,
+        text_area,
     );
+    if let Some(area) = big_area {
+        big_score(frame, area, p, gfx);
+    }
     let mut curves = Vec::new();
+    if let Some(b) = best {
+        curves.push(Curve::new(
+            "best",
+            Series::Best,
+            &b.response.freqs,
+            &b.response.db,
+        ));
+    }
     if let Some(r) = &p.reference {
         curves.push(Curve::new(
             "pinned",
@@ -758,7 +801,7 @@ fn placement(
         .collect();
     scaled.extend(curves.iter().cloned());
     let (curve_area, decay_area) = match (p.mode, latest_decay) {
-        (Mode::Sweeps, Some(w)) => {
+        (Mode::Sweeps | Mode::Fast, Some(w)) => {
             let [a, b] =
                 Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)])
                     .areas(plot_area);
@@ -792,6 +835,77 @@ fn placement(
             gfx,
         );
     }
+}
+
+/// Scores closer than this are about the same, dB.
+const SAME_DB: f64 = 0.3;
+
+/// How a score compares with the pinned one, and its colour: green when more even.
+fn compared(now_db: f64, pinned_db: f64) -> (String, Color) {
+    let delta = now_db - pinned_db;
+    if delta < -SAME_DB {
+        (
+            format!("{:.1} dB more even than pinned", -delta),
+            Color::Green,
+        )
+    } else if delta > SAME_DB {
+        (
+            format!("{delta:.1} dB less even than pinned"),
+            Color::LightRed,
+        )
+    } else {
+        ("about the same as pinned".to_owned(), Color::Gray)
+    }
+}
+
+/// The number that matters while moving things, big enough to read from across the room:
+/// how much more even than the pinned reading the latest one is, or without a pin, how
+/// uneven it is.
+fn big_score(frame: &mut Frame<'_>, area: Rect, p: &crate::app::PlacementState, gfx: &Graphics) {
+    let Some(now) = &p.latest else {
+        frame.render_widget(panel("Evenness"), area);
+        return;
+    };
+    let (number, caption, color) = match &p.reference {
+        Some(pinned) => {
+            let gain = pinned.score.evenness_db - now.score.evenness_db;
+            let color = compared(now.score.evenness_db, pinned.score.evenness_db).1;
+            let caption = if gain >= 0.0 {
+                "dB more even than pinned"
+            } else {
+                "dB less even than pinned"
+            };
+            (format!("{gain:+.1}"), caption, color)
+        }
+        None => (
+            format!("±{:.1}", now.score.evenness_db),
+            "dB uneven; Space pins it",
+            Color::Reset,
+        ),
+    };
+    let mut lines = bignum::lines(&number, Style::default().fg(color));
+    lines.push(Line::from(Span::styled(
+        caption,
+        Style::default().fg(color),
+    )));
+    if let (Some(best), Some(pinned)) = (&p.best[p.channel.index()], &p.reference) {
+        lines.push(Line::from(Span::styled(
+            format!(
+                "best so far {:+.1} dB",
+                pinned.score.evenness_db - best.score.evenness_db
+            ),
+            Style::default().fg(Series::Best.color(gfx)),
+        )));
+    }
+    // Centred vertically inside the border.
+    let pad = usize::from(area.height.saturating_sub(2)).saturating_sub(lines.len()) / 2;
+    lines.splice(0..0, std::iter::repeat_n(Line::from(""), pad));
+    frame.render_widget(
+        Paragraph::new(lines)
+            .alignment(Alignment::Center)
+            .block(panel("Evenness")),
+        area,
+    );
 }
 
 /// The time `w` takes to fade near `hz`, ms, and whether that is the longest it measures.

@@ -49,12 +49,15 @@ More screens:
 - `p` **Placement and room treatment** (measure step): the bass at your seat, measured over
   and over with an evenness score. **Walk around with a bass trap and see what it does right
   away**: pin the room as it is with Space, put the trap in a corner, and the curve shows the
-  difference. The same works for moving the speakers or your seat. Two modes, switched with
-  `l`: *sweeps* (a short sweep every couple of seconds, fine detail, and a waterfall showing
-  how long each note rings, compared with the pinned sweep) and *live* (bass-only periodic
-  noise without a break; the curve follows a change within about half a second). Below about
-  200 Hz the room decides what you hear, and this is the only cure for the dips no EQ can
-  fill.
+  difference. The same works for moving the speakers or your seat. A big number says how
+  many dB more even than the pinned state it is, readable from across the room, and the most
+  even curve so far stays on the chart in faded green. Three modes, switched with `m`:
+  *sweeps* (a short sweep every couple of seconds, fine detail, and a waterfall showing how
+  long each note rings, compared with the pinned sweep), *fast sweeps* (a one-second sweep
+  looping without pauses, curve and waterfall updated five times a second) and *live*
+  (bass-only periodic noise without a break; the curve follows a change within about half a
+  second). Below about 200 Hz the room decides what you hear, and this is the only cure for
+  the dips no EQ can fill.
 - `w` **Decay**: a waterfall of the bass, how each note fades after the sound stops, and the
   notes that ring longest.
 - `c` **Curiosities**: the room's resonances and the room dimensions they suggest,

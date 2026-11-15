@@ -2,13 +2,16 @@
 //! the speakers, the seat, the mic or a bass trap are moved, with a pinned reading to
 //! compare against.
 //!
-//! Two ways to measure, switched with a key:
+//! Three ways to measure, switched with a key:
 //!
 //! - **Sweeps**: a short bass sweep every couple of seconds. Each gives the response at fine
 //!   resolution and a waterfall of how the bass decays, which is where bass traps show.
-//! - **Live**: bass-only periodic noise ([`crate::dsp::periodic`]) plays continuously and
-//!   the response is recomputed from the latest third of a second ten times a second, so
-//!   the curve follows a moving trap within about half a second, at coarser resolution.
+//! - **Fast sweeps**: a one-second sweep played in a seamless loop
+//!   ([`crate::dsp::periodic`]), the response and the waterfall recomputed from the latest
+//!   second five times a second. A change shows fully within a second.
+//! - **Live**: bass-only periodic noise plays continuously and the response is recomputed
+//!   from the latest third of a second ten times a second, so the curve follows a moving
+//!   trap within about half a second, at coarser resolution and without the decay.
 //!
 //! Below about 200 Hz the room decides the response, and moving things by 20–50 cm changes
 //! it more than any EQ can; it is also the only cure for cancellation dips.
@@ -23,9 +26,11 @@ use crate::cal::Calibration;
 use crate::dsp::SAMPLE_RATE;
 use crate::dsp::decay::Waterfall;
 use crate::dsp::level::SplScale;
-use crate::dsp::periodic::PeriodicNoise;
+use crate::dsp::periodic::Periodic;
 use crate::dsp::spectrum::{Response, Smoothing, octave_average_db, smooth_power};
-use crate::dsp::sweep::{Sweep, SweepParams, quick_analysis};
+use crate::dsp::sweep::{
+    QuickAnalysis, Sweep, SweepParams, check_clipping, quick_analysis, quick_ir_analysis,
+};
 
 /// Highest frequency shown, Hz.
 pub const TOP_HZ: f64 = 500.0;
@@ -55,15 +60,23 @@ const LIVE_BAND: (f64, f64) = (15.0, 600.0);
 /// The live curve is recomputed after every this many recorded samples (0.1 s of sound),
 /// counted in audio rather than clock time so the simulator behaves like a room.
 const LIVE_HOP: usize = SAMPLE_RATE as usize / 10;
-/// Recording to skip when the noise starts (start-up latency, fade-in, the room filling).
+/// Fast sweeps: one sweep is 1.02 s. Shorter, and the room would still be ringing from one
+/// sweep when the next begins, which hides the decay; the waterfall needs 0.7 s after the
+/// direct sound, and the sweep's distortion lands 0.15 s before it (wrapped around).
+const FAST_PERIOD: usize = 3 << 14;
+/// The fast sweep's range, Hz: the same as a single sweep's.
+const FAST_BAND: (f64, f64) = (10.0, SWEEP_END_HZ);
+/// The fast-sweep result is recomputed after every this many recorded samples (0.2 s).
+const FAST_HOP: usize = SAMPLE_RATE as usize / 5;
+/// Recording to skip when a loop starts (start-up latency, fade-in, the room filling).
 const LIVE_SETTLE: usize = SAMPLE_RATE as usize * 3 / 4;
-/// Fade-in of the noise, so it does not start with a click.
+/// Fade-in of a loop, so it does not start with a click.
 const LIVE_FADE_IN: usize = SAMPLE_RATE as usize / 4;
 /// Weight of the newest slice in the live average (the rest is the previous average):
 /// steadies the curve against room noise while following a change within a few updates.
 const LIVE_NEW_WEIGHT: f64 = 0.5;
 /// Below this, the noise is taken not to reach the mic, dB (see
-/// [`PeriodicNoise::reaches_mic_db`]).
+/// [`Periodic::reaches_mic_db`]).
 const LIVE_MIN_SNR_DB: f64 = 15.0;
 
 /// How the placement screen measures.
@@ -71,8 +84,32 @@ const LIVE_MIN_SNR_DB: f64 = 15.0;
 pub enum Mode {
     /// A short sweep every couple of seconds: fine detail and the decay.
     Sweeps,
+    /// A sweep looping without pauses, updated five times a second: detail and the decay.
+    Fast,
     /// Continuous noise, updated ten times a second.
     Live,
+}
+
+impl Mode {
+    /// The next mode, for the key that cycles through them.
+    #[must_use]
+    pub fn next(self) -> Self {
+        match self {
+            Self::Sweeps => Self::Fast,
+            Self::Fast => Self::Live,
+            Self::Live => Self::Sweeps,
+        }
+    }
+
+    /// Its name, for the screen: "Fast sweeps".
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Sweeps => "Sweeps",
+            Self::Fast => "Fast sweeps",
+            Self::Live => "Live",
+        }
+    }
 }
 
 /// How even the bass is at one placement.
@@ -126,7 +163,7 @@ pub struct Reading {
     /// dB SPL from 20 Hz to [`TOP_HZ`].
     pub response: Response,
     pub score: Score,
-    /// How the bass decays (sweeps only).
+    /// How the bass decays (sweeps and fast sweeps).
     pub waterfall: Option<Waterfall>,
 }
 
@@ -152,7 +189,7 @@ impl Reading {
             r
         };
         let shown = match mode {
-            Mode::Sweeps => SWEEP_SMOOTHING_OCT,
+            Mode::Sweeps | Mode::Fast => SWEEP_SMOOTHING_OCT,
             Mode::Live => LIVE_SMOOTHING_OCT,
         };
         Self {
@@ -161,6 +198,38 @@ impl Reading {
             score: Score::of(&calibrated(SCORE_SMOOTHING_OCT)),
             response: calibrated(shown),
             waterfall: None,
+        }
+    }
+
+    /// A reading from a sweep's (or a looped sweep's) quick analysis, with its waterfall.
+    fn from_sweep(
+        q: QuickAnalysis,
+        mode: Mode,
+        channel: Channel,
+        peak_dbfs: f64,
+        calibration: (&Calibration, SplScale),
+    ) -> Self {
+        let mut reading = Self::new(&q.power, q.bin_hz, mode, channel, peak_dbfs, calibration);
+        reading.waterfall = Some(q.waterfall);
+        reading
+    }
+}
+
+/// A signal played in a seamless loop, and how often its result is recomputed.
+struct Looped {
+    signal: Periodic,
+    samples: Arc<[f32]>,
+    /// Recorded samples between updates.
+    hop: usize,
+}
+
+impl Looped {
+    fn new(signal: Periodic, hop: usize) -> Self {
+        let samples = signal.samples_f32().into();
+        Self {
+            signal,
+            samples,
+            hop,
         }
     }
 }
@@ -172,15 +241,16 @@ enum Run {
         recording: Vec<f32>,
         finished_at: Option<Instant>,
     },
-    Live {
+    /// Fast sweeps or live noise.
+    Loop {
         stream: Stream,
-        /// The latest recording, at most one period plus what arrived since.
+        /// The latest recording, at most one period.
         recent: Vec<f32>,
         /// Samples recorded since the noise started.
         received: usize,
         /// `received` at the last update.
         updated_at: usize,
-        /// The running average of the response power per bin.
+        /// The running average of the response power per bin (live noise).
         average: Option<Vec<f64>>,
     },
 }
@@ -194,6 +264,9 @@ pub struct PlacementState {
     pub latest: Option<Reading>,
     /// A pinned reading to compare against.
     pub reference: Option<Reading>,
+    /// The most even reading of each speaker (by [`Channel::index`]) since the pin was set
+    /// or the screen opened: where to put the trap back.
+    pub best: [Option<Reading>; 2],
     /// The latest bass response of each speaker (by [`Channel::index`]), so the chart can
     /// keep one scale for both.
     pub last: [Option<Response>; 2],
@@ -202,8 +275,8 @@ pub struct PlacementState {
     pub issue: Option<String>,
     sweep: Sweep,
     signal: Arc<[f32]>,
-    noise: PeriodicNoise,
-    noise_signal: Arc<[f32]>,
+    noise: Looped,
+    fast: Looped,
     run: Option<Run>,
 }
 
@@ -219,8 +292,8 @@ impl std::fmt::Debug for PlacementState {
 }
 
 impl PlacementState {
-    /// Sweeps mode on `channel`, at the measurement level `sweep_dbfs` (the live noise
-    /// peaks at the same level).
+    /// Sweeps mode on `channel`, at the measurement level `sweep_dbfs` (the looped signals
+    /// peak at the same level).
     #[must_use]
     pub fn new(channel: Channel, sweep_dbfs: f64) -> Self {
         let sweep = Sweep::new(SweepParams {
@@ -230,21 +303,23 @@ impl PlacementState {
             ..SweepParams::default()
         });
         let signal = sweep.samples_f32().into();
-        let noise = PeriodicNoise::new(LIVE_PERIOD, LIVE_BAND, sweep_dbfs, f64::from(SAMPLE_RATE));
-        let noise_signal = noise.samples_f32().into();
+        let rate = f64::from(SAMPLE_RATE);
+        let noise = Periodic::pink_noise(LIVE_PERIOD, LIVE_BAND, sweep_dbfs, rate);
+        let fast = Periodic::sweep(FAST_PERIOD, FAST_BAND, sweep_dbfs, rate);
         Self {
             channel,
             mode: Mode::Sweeps,
             paused: false,
             latest: None,
             reference: None,
+            best: [None, None],
             last: [None, None],
             count: 0,
             issue: None,
             sweep,
             signal,
-            noise,
-            noise_signal,
+            noise: Looped::new(noise, LIVE_HOP),
+            fast: Looped::new(fast, FAST_HOP),
             run: None,
         }
     }
@@ -255,7 +330,7 @@ impl PlacementState {
         self.run.is_some()
     }
 
-    /// Starts measuring unless already running or paused: one sweep, or the live noise.
+    /// Starts measuring unless already running or paused: one sweep, or a loop.
     ///
     /// # Errors
     ///
@@ -277,12 +352,17 @@ impl PlacementState {
                     finished_at: None,
                 }
             }
-            Mode::Live => {
+            Mode::Fast | Mode::Live => {
+                let looped = if self.mode == Mode::Fast {
+                    &self.fast
+                } else {
+                    &self.noise
+                };
                 let program = Program::Loop {
-                    signal: Arc::clone(&self.noise_signal),
+                    signal: Arc::clone(&looped.samples),
                     fade_in: LIVE_FADE_IN,
                 };
-                Run::Live {
+                Run::Loop {
                     stream: audio.start(Source::new(program, self.channel), Route::Hardware)?,
                     recent: Vec::new(),
                     received: 0,
@@ -305,25 +385,41 @@ impl PlacementState {
         self.stop();
     }
 
-    /// Switches between sweeps and live noise; the next start uses the new mode.
+    /// Switches to the next mode (sweeps, fast sweeps, live); the next start uses it.
     pub fn switch_mode(&mut self) {
-        self.mode = match self.mode {
-            Mode::Sweeps => Mode::Live,
-            Mode::Live => Mode::Sweeps,
-        };
+        self.mode = self.mode.next();
         self.stop();
     }
 
-    /// Pins the latest reading as the reference (or unpins when it already is).
+    /// Pins the latest reading as the reference (or unpins when it already is). Either way
+    /// the search for the best reading starts again.
     pub fn pin(&mut self) {
         if self.reference.is_some() && self.reference == self.latest {
             self.reference = None;
         } else {
             self.reference.clone_from(&self.latest);
         }
+        self.best = [None, None];
+        if let Some(r) = &self.reference {
+            self.best[r.channel.index()] = Some(r.clone());
+        }
+    }
+
+    /// The best reading of the speaker that is playing, when it is not the latest one.
+    #[must_use]
+    pub fn best_other_than_latest(&self) -> Option<&Reading> {
+        let best = self.best[self.channel.index()].as_ref()?;
+        (Some(best) != self.latest.as_ref()).then_some(best)
     }
 
     fn arrived(&mut self, reading: Reading) {
+        let best = &mut self.best[reading.channel.index()];
+        if best
+            .as_ref()
+            .is_none_or(|b| reading.score.evenness_db < b.score.evenness_db)
+        {
+            *best = Some(reading.clone());
+        }
         self.last[reading.channel.index()] = Some(reading.response.clone());
         self.latest = Some(reading);
         self.count += 1;
@@ -353,15 +449,8 @@ impl PlacementState {
                 self.run = None;
                 match quick_analysis(&self.sweep, &recording) {
                     Ok(q) => {
-                        let mut reading = Reading::new(
-                            &q.power,
-                            q.bin_hz,
-                            mode,
-                            channel,
-                            peak_dbfs,
-                            (cal, scale),
-                        );
-                        reading.waterfall = Some(q.waterfall);
+                        let reading =
+                            Reading::from_sweep(q, mode, channel, peak_dbfs, (cal, scale));
                         self.arrived(reading);
                         true
                     }
@@ -371,30 +460,49 @@ impl PlacementState {
                     }
                 }
             }
-            Some(Run::Live {
+            Some(Run::Loop {
                 stream,
                 recent,
                 received,
                 updated_at,
                 average,
             }) => {
+                let looped = if mode == Mode::Fast {
+                    &self.fast
+                } else {
+                    &self.noise
+                };
                 let new = stream.drain();
                 *received += new.len();
                 recent.extend(new);
-                let period = self.noise.len();
+                let period = looped.signal.len();
                 if recent.len() > period {
                     recent.drain(..recent.len() - period);
                 }
-                if *received < LIVE_SETTLE + period || *received < *updated_at + LIVE_HOP {
+                if *received < LIVE_SETTLE + period || *received < *updated_at + looped.hop {
                     return false;
                 }
                 *updated_at = *received;
-                if crate::dsp::level::peak_dbfs(recent) > -1.0 {
-                    self.issue =
-                        Some("the mic signal clipped; turn the amplifier down a little".to_owned());
+                if let Err(e) = check_clipping(recent) {
+                    self.issue = Some(e.to_string());
                     return false;
                 }
-                if self.noise.reaches_mic_db(recent) < LIVE_MIN_SNR_DB {
+                if mode == Mode::Fast {
+                    let ir = looped.signal.impulse_response(recent);
+                    return match quick_ir_analysis(&ir, f64::from(SAMPLE_RATE)) {
+                        Ok(q) => {
+                            let reading =
+                                Reading::from_sweep(q, mode, channel, peak_dbfs, (cal, scale));
+                            self.arrived(reading);
+                            true
+                        }
+                        Err(e) => {
+                            self.issue = Some(e.to_string());
+                            false
+                        }
+                    };
+                }
+                if looped.signal.reaches_mic_db(recent) < LIVE_MIN_SNR_DB {
                     self.issue = Some(
                         "the noise is not reaching the mic; check the output, the amplifier \
                          and that the mic points at the speakers"
@@ -402,7 +510,7 @@ impl PlacementState {
                     );
                     return false;
                 }
-                let fresh = self.noise.response_power(recent);
+                let fresh = looped.signal.response_power(recent);
                 let power = match average.take() {
                     Some(old) => old
                         .iter()
@@ -413,7 +521,7 @@ impl PlacementState {
                 };
                 let reading = Reading::new(
                     &power,
-                    self.noise.bin_hz(),
+                    looped.signal.bin_hz(),
                     mode,
                     channel,
                     peak_dbfs,

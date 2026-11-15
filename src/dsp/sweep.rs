@@ -282,14 +282,33 @@ pub struct QuickAnalysis {
 ///
 /// Returns [`SweepIssue::Clipped`] or [`SweepIssue::NoSignal`].
 pub fn quick_analysis(sweep: &Sweep, recording: &[f32]) -> Result<QuickAnalysis, SweepIssue> {
+    check_clipping(recording)?;
+    quick_ir_analysis(&sweep.deconvolve(recording), f64::from(sweep.params.rate))
+}
+
+/// Rejects a recording that clipped.
+///
+/// # Errors
+///
+/// Returns [`SweepIssue::Clipped`].
+pub fn check_clipping(recording: &[f32]) -> Result<(), SweepIssue> {
     let capture_peak_dbfs = super::level::peak_dbfs(recording);
     if capture_peak_dbfs > -1.0 {
         return Err(SweepIssue::Clipped {
             peak_dbfs: capture_peak_dbfs,
         });
     }
-    let rate = f64::from(sweep.params.rate);
-    let ir = sweep.deconvolve(recording);
+    Ok(())
+}
+
+/// [`quick_analysis`] of an impulse response that is already known, such as the circular
+/// one of a looped sweep ([`crate::dsp::periodic::Periodic::impulse_response`]). It must be
+/// at least a second long; its direct sound is its largest sample.
+///
+/// # Errors
+///
+/// Returns [`SweepIssue::NoSignal`] when the direct sound does not stand out.
+pub fn quick_ir_analysis(ir: &[f64], rate: f64) -> Result<QuickAnalysis, SweepIssue> {
     let peak = ir
         .iter()
         .enumerate()
@@ -308,9 +327,9 @@ pub fn quick_analysis(sweep: &Sweep, recording: &[f32]) -> Result<QuickAnalysis,
         return Err(SweepIssue::NoSignal);
     }
     Ok(QuickAnalysis {
-        power: windowed_power(&ir, peak, window, rate),
+        power: windowed_power(ir, peak, window, rate),
         bin_hz: rate / SPECTRUM_FFT_LEN as f64,
-        waterfall: super::decay::Waterfall::new(&ir, peak, rate),
+        waterfall: super::decay::Waterfall::new(ir, peak, rate),
     })
 }
 
