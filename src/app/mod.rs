@@ -892,7 +892,22 @@ impl App {
                 return true;
             }
             KeyCode::Char(' ') => p.pin(),
-            KeyCode::Tab => p.channel = p.channel.other(),
+            KeyCode::Tab => p.switch_channel(),
+            KeyCode::Char('l') => {
+                p.switch_mode();
+                self.message = Some(
+                    match p.mode {
+                        placement::Mode::Live => {
+                            "Live: bass noise plays continuously; the curve follows within half a \
+                         second."
+                        }
+                        placement::Mode::Sweeps => {
+                            "Sweeps: finer detail, and the waterfall shows how the bass decays."
+                        }
+                    }
+                    .into(),
+                );
+            }
             KeyCode::Char('s') => {
                 p.paused = !p.paused;
                 if p.paused {

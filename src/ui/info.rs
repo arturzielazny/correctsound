@@ -69,12 +69,18 @@ fn simple_lines() -> Vec<Line<'static>> {
         gap(),
         h("Placement and room treatment (p on the measure step)"),
         p(
-            "Short bass sweeps repeat every couple of seconds while you move the speakers or \
-           your seat, or carry a bass trap from corner to corner. Each one is drawn as it \
-           arrives, with a number for how uneven the bass is (lower is better). Pin the room \
-           as it is with Space, try a change, keep what helps, then measure. Keep the mic \
-           where it is, and keep still while a sweep plays. It is the only cure for the deep \
+            "The bass at your seat, measured over and over while you move the speakers or your \
+           seat, or carry a bass trap from corner to corner, with a number for how uneven it \
+           is (lower is better). Pin the room as it is with Space, try a change, keep what \
+           helps, then measure. Keep the mic where it is. It is the only cure for the deep \
            dips EQ cannot fill.",
+        ),
+        p(
+            "Two ways to measure, switched with l. Sweeps: a short sweep every couple of \
+           seconds, with fine detail and a waterfall of how the bass decays; bass traps show \
+           best there, as notes that stop ringing sooner (keep still while a sweep plays). \
+           Live: a low rumble of noise plays without a break and the curve follows any change \
+           within about half a second, so you can watch it while you carry a trap.",
         ),
         gap(),
         h("Decay (w)"),
@@ -224,7 +230,19 @@ fn technical_lines() -> Vec<Line<'static>> {
            checked. Shown at 1/24 octave from 20 to 500 Hz, calibrated. Score: RMS of the \
            response minus its two-octave dB average, 40–250 Hz (a slope such as the speaker's \
            roll-off scores zero, peaks and dips do not), with the deepest dip and highest peak \
-           against that trend.",
+           against that trend. Each sweep's impulse response also gives a waterfall (as in \
+           Decay below), and the notes that ring longest are compared with the pinned sweep.",
+        ),
+        p(
+            "Live: periodic pink noise, 15–600 Hz, peaking at the sweep level, one period of \
+           2^14 samples (0.34 s) played in a loop. Every frequency in it is a multiple of the \
+           loop rate (2.9 Hz), so once the room has settled any one period of the recording \
+           gives |H|² = |Y|²/|X|² exactly at those frequencies, whatever its start: no \
+           alignment with playback, and powers rather than phases, so the mic's own USB clock \
+           does not matter. Recomputed from the latest period every 4800 recorded samples \
+           (0.1 s), averaged half and half with the previous result, shown at 1/12 octave. \
+           A change shows in about 0.6 s: one period plus the room's decay plus the average. \
+           The score is computed at 1/24 octave in both modes.",
         ),
         gap(),
         h("Decay"),

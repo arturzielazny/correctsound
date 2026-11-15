@@ -76,6 +76,14 @@ fn main() {
     });
     app.message = None;
     shots.take(&app, "5b-placement");
+    // Live mode: the same comparison, from noise, updated ten times a second.
+    press(&mut app, KeyCode::Char('l'));
+    let seen = app.placement.as_ref().map_or(0, |p| p.count);
+    tick_until(&mut app, |a| {
+        a.placement.as_ref().is_some_and(|p| p.count >= seen + 15)
+    });
+    app.message = None;
+    shots.take(&app, "5c-live");
     press(&mut app, KeyCode::Esc);
 
     press(&mut app, KeyCode::Enter);

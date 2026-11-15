@@ -267,6 +267,24 @@ impl Chain {
         }
     }
 
+    /// Moves the wall behind the speaker (or removes it), keeping the sound already in
+    /// flight: a real room changes while the music plays.
+    fn set_wall(&mut self, wall_m: Option<f64>) {
+        match (wall_m, &mut self.wall) {
+            (Some(d), Some((_, _, delay, gain))) => (*delay, *gain) = wall_reflection(d),
+            (Some(d), None) => {
+                let (delay, gain) = wall_reflection(d);
+                self.wall = Some((
+                    Biquad::low_pass(RATE, WALL_LOW_PASS_HZ, std::f64::consts::FRAC_1_SQRT_2),
+                    BiquadState::default(),
+                    delay,
+                    gain,
+                ));
+            }
+            (None, _) => self.wall = None,
+        }
+    }
+
     fn process(&mut self, buf: &mut [f32]) {
         for v in buf.iter_mut() {
             let mut x = f64::from(*v) * self.eq_gain;
@@ -312,10 +330,14 @@ impl AudioBackend for SimBackend {
             while !stop2.load(Ordering::Acquire) {
                 let mut buf = vec![0f32; block];
                 source.fill_mono(&mut buf);
-                // Volume changes apply live while monitoring.
-                let vol = state.lock().expect("sim state lock poisoned").sink_volume;
+                // Volume and wall changes apply live, as in a real room.
+                let (vol, wall_m) = {
+                    let st = state.lock().expect("sim state lock poisoned");
+                    (st.sink_volume, st.wall_m)
+                };
                 let room_gain = db_to_amplitude(config.rooms[source.channel.index()].gain_db);
                 chain.gain = room_gain * vol.powi(3);
+                chain.set_wall(wall_m);
                 chain.process(&mut buf);
                 frames += block;
                 if source.is_done() {

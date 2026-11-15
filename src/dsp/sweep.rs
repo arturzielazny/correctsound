@@ -263,14 +263,25 @@ impl SweepAnalysis {
     }
 }
 
-/// A quick look at one recording, for the live placement loop: the windowed power
-/// spectrum (per FFT bin, [`SPECTRUM_FFT_LEN`] long) and the bin width. Only clipping and a
-/// missing sweep are rejected; the per-octave checks of a full measurement are skipped.
+/// A quick look at one recording, for the live placement loop.
+#[derive(Debug, Clone)]
+pub struct QuickAnalysis {
+    /// Windowed power spectrum per FFT bin ([`SPECTRUM_FFT_LEN`] long).
+    pub power: Vec<f64>,
+    /// Width of one bin, Hz.
+    pub bin_hz: f64,
+    /// How the bass decays after the sweep.
+    pub waterfall: super::decay::Waterfall,
+}
+
+/// Analyses one recording for the live placement loop: the windowed power spectrum and the
+/// bass waterfall. Only clipping and a missing sweep are rejected; the per-octave checks of
+/// a full measurement are skipped.
 ///
 /// # Errors
 ///
 /// Returns [`SweepIssue::Clipped`] or [`SweepIssue::NoSignal`].
-pub fn quick_power(sweep: &Sweep, recording: &[f32]) -> Result<(Vec<f64>, f64), SweepIssue> {
+pub fn quick_analysis(sweep: &Sweep, recording: &[f32]) -> Result<QuickAnalysis, SweepIssue> {
     let capture_peak_dbfs = super::level::peak_dbfs(recording);
     if capture_peak_dbfs > -1.0 {
         return Err(SweepIssue::Clipped {
@@ -296,10 +307,11 @@ pub fn quick_power(sweep: &Sweep, recording: &[f32]) -> Result<(Vec<f64>, f64), 
     if amplitude_to_db(ir[peak]) - 10.0 * noise.max(1e-30).log10() < 25.0 {
         return Err(SweepIssue::NoSignal);
     }
-    Ok((
-        windowed_power(&ir, peak, window, rate),
-        rate / SPECTRUM_FFT_LEN as f64,
-    ))
+    Ok(QuickAnalysis {
+        power: windowed_power(&ir, peak, window, rate),
+        bin_hz: rate / SPECTRUM_FFT_LEN as f64,
+        waterfall: super::decay::Waterfall::new(&ir, peak, rate),
+    })
 }
 
 /// Ratio of signal to noise power in the octave band centred on `centre`, dB.

@@ -2,6 +2,7 @@
 
 use std::time::{Duration, Instant};
 
+use correctsound::app::placement::{Mode, Reading};
 use correctsound::app::{App, LevelPhase, Options, Step};
 use correctsound::eq::fit::AutoMethod;
 use correctsound::ui::graphics::Graphics;
@@ -24,6 +25,21 @@ fn tick_until(app: &mut App, what: &str, timeout: Duration, done: impl Fn(&App) 
         app.tick();
         std::thread::sleep(Duration::from_millis(10));
     }
+}
+
+/// How differently two bass readings are shaped from 40 to 250 Hz: the RMS of their
+/// difference after removing the average offset, dB.
+fn shape_difference(a: &Reading, b: &Reading) -> f64 {
+    let diff: Vec<f64> = a
+        .response
+        .freqs
+        .iter()
+        .zip(&a.response.db)
+        .filter(|(f, _)| (40.0..=250.0).contains(*f))
+        .map(|(&f, &d)| d - b.response.at(f))
+        .collect();
+    let mean = diff.iter().sum::<f64>() / diff.len() as f64;
+    (diff.iter().map(|d| (d - mean).powi(2)).sum::<f64>() / diff.len() as f64).sqrt()
 }
 
 fn render(app: &App) -> String {
@@ -135,9 +151,83 @@ fn full_wizard_on_simulator() {
     );
     let screen = render(&app);
     assert!(
-        screen.contains("Placement") && screen.contains("pinned"),
+        screen.contains("Placement") && screen.contains("pinned") && screen.contains("fades"),
         "{screen}"
     );
+    // Each sweep also measures how the bass decays.
+    assert!(now.waterfall.is_some() && pinned.waterfall.is_some());
+
+    // Live mode: continuous noise, a new reading every tenth of a second.
+    press(&mut app, KeyCode::Char('l'));
+    let count = |a: &App| a.placement.as_ref().map_or(0, |p| p.count);
+    let seen = count(&app);
+    let started = Instant::now();
+    tick_until(&mut app, "live readings", Duration::from_secs(10), |a| {
+        count(a) >= seen + 5
+    });
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "{:?}",
+        started.elapsed()
+    );
+    let live = app
+        .placement
+        .as_ref()
+        .and_then(|p| p.latest.clone())
+        .expect("live reading");
+    assert_eq!(live.mode, Mode::Live);
+    assert!(live.waterfall.is_none());
+    // The same placement measured the other way looks the same: the live curve matches the
+    // sweep at this wall distance (1 m) much better than the one at the other (0.6 m).
+    let (same, other) = (
+        shape_difference(&live, &now),
+        shape_difference(&live, &pinned),
+    );
+    eprintln!("live at 1 m vs sweep at 1 m {same:.2} dB, vs sweep at 0.6 m {other:.2} dB");
+    assert!(same < other / 2.0, "{same} vs {other}");
+    // Moving the wall while the noise plays: the dip follows within a few updates.
+    for _ in 0..8 {
+        press(&mut app, KeyCode::Left);
+    }
+    // How long until the live curve shows the move (the simulator runs 4× real time).
+    let moved_at = Instant::now();
+    tick_until(
+        &mut app,
+        "the live curve to follow",
+        Duration::from_secs(10),
+        |a| {
+            a.placement
+                .as_ref()
+                .and_then(|p| p.latest.as_ref())
+                .is_some_and(|r| shape_difference(r, &pinned) < 1.0)
+        },
+    );
+    let followed = moved_at.elapsed().as_secs_f64() * 4.0;
+    eprintln!("live followed the move in {followed:.2} s of simulated time");
+    assert!(followed < 1.0, "{followed} s");
+    let seen = count(&app);
+    tick_until(
+        &mut app,
+        "live after moving",
+        Duration::from_secs(10),
+        |a| count(a) >= seen + 10,
+    );
+    let moved = app
+        .placement
+        .as_ref()
+        .and_then(|p| p.latest.clone())
+        .expect("live reading");
+    let (same, other) = (
+        shape_difference(&moved, &pinned),
+        shape_difference(&moved, &now),
+    );
+    eprintln!("live at 0.6 m vs sweep at 0.6 m {same:.2} dB, vs sweep at 1 m {other:.2} dB");
+    assert!(same < other / 2.0, "{same} vs {other}");
+    assert!(render(&app).contains("Live"));
+    // Back where it was for the measurements that follow.
+    for _ in 0..8 {
+        press(&mut app, KeyCode::Right);
+    }
     press(&mut app, KeyCode::Esc);
     assert!(app.placement.is_none());
     assert_eq!(app.step, Step::Measure);

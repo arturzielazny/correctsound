@@ -155,9 +155,9 @@ fn hints(app: &App) -> String {
     }
     if app.placement.is_some() {
         return if app.simulated() {
-            "Space pin / unpin   Tab speaker   s pause   ←/→ move the simulated speakers   Esc done"
+            "Space pin / unpin   l live / sweeps   Tab speaker   s pause   ←/→ move the simulated speakers   Esc done"
         } else {
-            "Space pin / unpin   Tab speaker   s pause   Esc done"
+            "Space pin / unpin   l live / sweeps   Tab speaker   s pause   Esc done"
         }
         .to_owned();
     }
@@ -622,8 +622,8 @@ fn measure(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Graphics) {
     );
 }
 
-/// The live placement screen: instructions, scores, and the bass of the latest sweep
-/// over the pinned one.
+/// The placement screen: instructions, scores, the bass of the latest reading over the
+/// pinned one, and in sweeps mode how the bass decays.
 fn placement(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -631,29 +631,44 @@ fn placement(
     p: &crate::app::PlacementState,
     gfx: &mut Graphics,
 ) {
-    use crate::app::placement::{SCORE_FROM_HZ, SCORE_TO_HZ, Score};
+    use crate::app::placement::{Mode, SCORE_FROM_HZ, SCORE_TO_HZ, Score};
     let [status, plot_area] =
-        Layout::vertical([Constraint::Length(9), Constraint::Min(8)]).areas(area);
+        Layout::vertical([Constraint::Length(11), Constraint::Min(8)]).areas(area);
+    let intro = match p.mode {
+        Mode::Sweeps => {
+            "Sweeps: a short bass sweep every couple of seconds while you move the speakers or \
+             your seat by 10–50 cm, or try a bass trap in each corner. The waterfall shows how \
+             the bass decays: traps shorten the ringing. l switches to live noise, which \
+             follows a change within half a second."
+        }
+        Mode::Live => {
+            "Live: bass-only noise plays continuously and the curve is recomputed ten times a \
+             second from the latest third of a second, so it follows a bass trap as you carry \
+             it. l switches back to sweeps, for finer detail and the decay."
+        }
+    };
     let mut lines = vec![
-        Line::from(
-            "Short bass sweeps repeat while you move the speakers or your seat by 10–50 cm, or try a \
-             bass trap in each corner. Below 200 Hz the room decides what you hear: placement and \
-             treatment fix what no EQ can.",
-        ),
+        Line::from(intro),
         Line::from(
             "Pin a placement with Space, try another, keep the one with the smaller number. Lower \
              is more even: it counts peaks and dips, not overall level.",
         ),
         Line::from(""),
     ];
-    let state = if p.paused {
-        "paused (s resumes)".to_owned()
-    } else if p.sweeping() {
-        format!("sweeping the {} speaker…", p.channel.name().to_lowercase())
-    } else {
-        "starting…".to_owned()
+    let speaker = p.channel.name().to_lowercase();
+    let (label, state) = match (p.mode, p.paused, p.running()) {
+        (_, true, _) => (String::new(), "paused (s resumes)".to_owned()),
+        (Mode::Sweeps, false, true) => (
+            format!("Sweep {}  ", p.count),
+            format!("sweeping the {speaker} speaker…"),
+        ),
+        (Mode::Live, false, true) => (
+            format!("Live, {} updates  ", p.count),
+            format!("noise from the {speaker} speaker"),
+        ),
+        (_, false, false) => (String::new(), "starting…".to_owned()),
     };
-    let mut head = vec![Span::raw(format!("Sweep {}  ", p.count)), Span::raw(state)];
+    let mut head = vec![Span::raw(label), Span::raw(state)];
     if let Some(d) = app.sim_wall_m() {
         head.push(Span::styled(
             format!("   simulated speakers {:.0} cm from the wall", d * 100.0),
@@ -700,6 +715,15 @@ fn placement(
             Style::default().fg(Color::Gray),
         )));
     }
+    let latest_decay = p.latest.as_ref().and_then(|r| r.waterfall.as_ref());
+    if p.mode == Mode::Sweeps
+        && let Some(w) = latest_decay
+    {
+        lines.push(decay_line(
+            w,
+            p.reference.as_ref().and_then(|r| r.waterfall.as_ref()),
+        ));
+    }
     if let Some(issue) = &p.issue {
         lines.push(Line::from(bad(issue)));
     }
@@ -725,7 +749,7 @@ fn placement(
         };
         curves.push(Curve::new("now", series, &r.response.freqs, &r.response.db));
     }
-    // The scale also covers the other speaker's latest sweep, so Tab keeps it.
+    // The scale also covers the other speaker's latest reading, so Tab keeps it.
     let mut scaled: Vec<Curve> = p
         .last
         .iter()
@@ -733,9 +757,18 @@ fn placement(
         .map(|r| Curve::new("", Series::Reference, &r.freqs, &r.db))
         .collect();
     scaled.extend(curves.iter().cloned());
+    let (curve_area, decay_area) = match (p.mode, latest_decay) {
+        (Mode::Sweeps, Some(w)) => {
+            let [a, b] =
+                Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)])
+                    .areas(plot_area);
+            (a, Some((b, w)))
+        }
+        _ => (plot_area, None),
+    };
     plot::draw_axes(
         frame,
-        plot_area,
+        curve_area,
         "Bass at the mic, dB SPL",
         &curves,
         &[],
@@ -743,6 +776,94 @@ fn placement(
         plot::y_range(&scaled, plot::BASS),
         gfx,
     );
+    if let Some((area, w)) = decay_area {
+        let slices: Vec<Vec<f64>> = (0..w.power.len()).map(|k| w.slice_db(k).db).collect();
+        let marks: Vec<f64> = w.ringing(30.0).iter().take(3).map(|r| r.hz).collect();
+        plot::draw_decay(
+            frame,
+            area,
+            "How the bass fades, latest sweep",
+            plot::Decay {
+                times_ms: &w.times_ms,
+                freqs: &w.freqs,
+                slices: &slices,
+                marks: &marks,
+            },
+            gfx,
+        );
+    }
+}
+
+/// The time `w` takes to fade near `hz`, ms, and whether that is the longest it measures.
+fn fade_at(w: &crate::dsp::decay::Waterfall, hz: f64) -> (f64, bool) {
+    let fade = w.fade_ms();
+    let i = w
+        .freqs
+        .iter()
+        .enumerate()
+        .min_by(|a, b| (a.1 / hz).ln().abs().total_cmp(&(b.1 / hz).ln().abs()))
+        .map_or(0, |(i, _)| i);
+    let ms = fade.get(i).copied().unwrap_or(0.0);
+    (ms, ms >= w.times_ms.last().copied().unwrap_or(400.0) - 1e-6)
+}
+
+fn ms_text((ms, capped): (f64, bool)) -> String {
+    if capped {
+        format!("≥{ms:.0} ms")
+    } else {
+        format!("{ms:.0} ms")
+    }
+}
+
+/// The notes that ring longest now, and with a pinned sweep, how long they rang then.
+fn decay_line(
+    now: &crate::dsp::decay::Waterfall,
+    pinned: Option<&crate::dsp::decay::Waterfall>,
+) -> Line<'static> {
+    let mut notes: Vec<f64> = now.ringing(30.0).iter().take(3).map(|r| r.hz).collect();
+    if let Some(p) = pinned {
+        for r in p.ringing(30.0).iter().take(3) {
+            if notes.iter().all(|n| (n / r.hz).log2().abs() > 1.0 / 6.0) {
+                notes.push(r.hz);
+            }
+        }
+    }
+    let typical = now
+        .median_fade_ms(30.0, 300.0)
+        .map_or(String::new(), |m| format!("typical {m:.0} ms"));
+    if notes.is_empty() {
+        return Line::from(vec![
+            Span::raw(format!("Decay: {typical}; ")),
+            Span::styled(
+                "no note rings much longer",
+                Style::default().fg(Color::Green),
+            ),
+        ]);
+    }
+    let mut spans = vec![Span::raw(format!("Decay ({typical}): "))];
+    for (i, &hz) in notes.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::raw(", "));
+        }
+        let n = fade_at(now, hz);
+        match pinned.map(|p| fade_at(p, hz)) {
+            Some(was) => {
+                let color = if n.0 < was.0 * 0.85 {
+                    Color::Green
+                } else if n.0 > was.0 * 1.15 {
+                    Color::LightRed
+                } else {
+                    Color::Reset
+                };
+                spans.push(Span::styled(
+                    format!("{hz:.0} Hz {} (pinned {})", ms_text(n), ms_text(was)),
+                    Style::default().fg(color),
+                ));
+            }
+            None => spans.push(Span::raw(format!("{hz:.0} Hz {}", ms_text(n)))),
+        }
+    }
+    Line::from(spans)
 }
 
 /// The decay view: the waterfall of the shown channel and the notes that ring longest.

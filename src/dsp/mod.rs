@@ -4,6 +4,7 @@ pub mod biquad;
 pub mod decay;
 pub mod level;
 pub mod noise;
+pub mod periodic;
 pub mod room;
 pub mod spectrum;
 pub mod sweep;

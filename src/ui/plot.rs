@@ -577,7 +577,11 @@ pub fn draw_decay(
         .borders(Borders::ALL)
         .title(format!(" {title} "))
         .title_bottom(TextLine::from(Span::styled(
-            " time runs towards you: the back slice is the sound as it starts, each one in front 20 ms later ",
+            if area.width > 100 {
+                " time runs towards you: the back slice is the sound as it starts, each one in front 20 ms later "
+            } else {
+                " time runs towards you, 20 ms per slice "
+            },
             Style::default().fg(Color::Gray),
         )));
     let inner = block.inner(area);
