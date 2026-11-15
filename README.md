@@ -59,7 +59,9 @@ More screens:
   second). Below about 200 Hz the room decides what you hear, and this is the only cure for
   the dips no EQ can fill.
 - `w` **Decay**: a waterfall of the bass, how each note fades after the sound stops, and the
-  notes that ring longest.
+  notes that ring longest. The room's lowest resonances (modes) are also measured on their
+  own, however long they ring: each one's time to fade 60 dB against the rest of the room,
+  from its energy decay, cross-checked against the width of its peak.
 - `c` **Curiosities**: the room's resonances and the room dimensions they suggest,
   reverberation time per octave, the strongest early reflection, ringing notes,
   cancellations and broad dips with their likely cause, the speakers' bass and treble

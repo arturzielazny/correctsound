@@ -238,12 +238,17 @@ fn ringing_line(analyses: &[&[SweepAnalysis]; 2]) -> Option<String> {
         ));
     }
     found.sort_by(|a, b| b.1.total_cmp(&a.1));
+    let modes = all_modes(analyses);
     let list: Vec<String> = found
         .iter()
         .take(4)
         .map(|(f, t, ch)| {
             if *t >= crate::dsp::decay::SLICE_STEP_MS * (crate::dsp::decay::SLICES - 1) as f64 {
-                format!("{} over {t:.0} ms ({ch})", hz(*f))
+                // Past the waterfall's 400 ms: the mode measured on its own says how long.
+                match crate::dsp::modes::near(&modes, *f) {
+                    Some(m) => format!("{} {} ({ch})", hz(*f), m.fade_20_text()),
+                    None => format!("{} over {t:.0} ms ({ch})", hz(*f)),
+                }
             } else {
                 format!("{} {t:.0} ms ({ch})", hz(*f))
             }
@@ -253,6 +258,46 @@ fn ringing_line(analyses: &[&[SweepAnalysis]; 2]) -> Option<String> {
         "Bass notes that keep ringing after the music stops (time to fade {FADE_DB:.0} dB; \
          typical here {typical:.0} ms): {}. Press w for the decay view.",
         list.join(", ")
+    ))
+}
+
+/// The room modes heard from both speakers, merged over every measurement.
+fn all_modes(analyses: &[&[SweepAnalysis]; 2]) -> Vec<crate::dsp::modes::Mode> {
+    let all: Vec<&[crate::dsp::modes::Mode]> = analyses
+        .iter()
+        .flat_map(|runs| runs.iter().map(|a| a.modes.as_slice()))
+        .collect();
+    crate::dsp::modes::merge(&all)
+}
+
+/// The room modes and how long each rings, against the room's reverberation elsewhere.
+fn modes_line(analyses: &[&[SweepAnalysis]; 2]) -> Option<String> {
+    let modes = all_modes(analyses);
+    if modes.is_empty() {
+        return None;
+    }
+    let reverb = median(
+        analyses
+            .iter()
+            .flat_map(|runs| runs.iter())
+            .flat_map(|a| a.decay.iter().map(|d| d.1))
+            .collect(),
+    );
+    let list: Vec<String> = modes
+        .iter()
+        .map(|m| format!("{:.1} Hz {}", m.hz, m.t60_text()))
+        .collect();
+    let elsewhere = reverb.map_or(String::new(), |r| format!("; the room elsewhere {r:.1} s"));
+    let boomy = reverb.is_some_and(|r| modes.iter().any(|m| m.t60_s > 2.0 * r));
+    Some(format!(
+        "Room modes and how long each rings (time to fade 60 dB{elsewhere}): {}.{}",
+        list.join(", "),
+        if boomy {
+            " Those ringing more than twice as long as the room are what sounds boomy; a bass \
+             trap that works shortens them, which fast sweeps in placement show."
+        } else {
+            ""
+        }
     ))
 }
 
@@ -383,6 +428,9 @@ pub fn insights(inp: &Inputs<'_>) -> Vec<Section> {
                 2000.0 * (t / volume).sqrt()
             ));
         }
+    }
+    if let Some(line) = modes_line(&inp.analyses) {
+        room.push(line);
     }
     if let Some(line) = ringing_line(&inp.analyses) {
         room.push(line);

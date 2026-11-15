@@ -75,6 +75,10 @@ impl Default for SimConfig {
             rooms: [
                 SimRoom {
                     resonances: vec![
+                        // The room's length mode, lightly damped like a real room's: it rings
+                        // for about 0.8 s (a peaking filter's poles give T60 = 2.2·Q·A / f,
+                        // A = 10^(gain/40)).
+                        (33.0, 10.0, 7.0),
                         (48.0, 6.0, 5.0),
                         (97.0, 8.0, 12.0),
                         (122.0, 10.0, 6.0),
@@ -91,6 +95,7 @@ impl Default for SimConfig {
                 },
                 SimRoom {
                     resonances: vec![
+                        (33.0, 9.0, 7.0),
                         (45.0, 7.0, 8.0),
                         (110.0, 6.0, 5.0),
                         (450.0, 5.0, 5.0),

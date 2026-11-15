@@ -271,9 +271,19 @@ fn the_sharpest_simulated_resonance_rings_longest() {
     let sweep = Sweep::new(SweepParams::default());
     let a = measure(&backend, &sweep, Channel::Left, Route::Hardware);
     let ringing = a.waterfall.ringing(30.0);
-    // 97 Hz is the left room's narrowest boost (Q 12, +8 dB).
+    // The left room's 33 Hz mode (+10 dB, Q 7) rings longest: its poles give
+    // T60 = 2.2·Q·A / f = 2.2 · 7 · 1.78 / 33 = 0.83 s, so it fades 20 dB in about 280 ms.
     let first = ringing.first().expect("something rings");
-    assert!((first.hz / 97.0).log2().abs() < 0.1, "{ringing:?}");
+    assert!((first.hz / 33.0).log2().abs() < 0.1, "{ringing:?}");
     let typical = a.waterfall.median_fade_ms(30.0, 300.0).expect("median");
     assert!(first.fade_ms > 2.0 * typical, "{ringing:?} vs {typical}");
+    // Measured on its own, the mode's decay matches what the filter rings for.
+    let t60 = 2.2 * 7.0 * 10f64.powf(10.0 / 40.0) / 33.0;
+    let mode =
+        correctsound::dsp::modes::near(&a.modes, 33.0).unwrap_or_else(|| panic!("{:?}", a.modes));
+    eprintln!("33 Hz mode: {mode:?}, expected T60 {t60:.2} s");
+    assert!(
+        (mode.t60_s / t60 - 1.0).abs() < 0.15,
+        "{mode:?} vs {t60:.2} s"
+    );
 }

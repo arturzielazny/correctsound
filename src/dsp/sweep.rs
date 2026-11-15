@@ -176,6 +176,8 @@ pub struct SweepAnalysis {
     pub decay: Vec<(f64, f64)>,
     /// How the bass fades after the direct sound (informational).
     pub waterfall: super::decay::Waterfall,
+    /// The room's lowest resonances and how long each rings (informational).
+    pub modes: Vec<super::modes::Mode>,
 }
 
 /// Octave bands whose signal-to-noise ratio gates a measurement.
@@ -283,6 +285,7 @@ impl SweepAnalysis {
             reflection: super::room::early_reflection(&ir, peak, rate),
             decay: super::room::decay_times(&ir, peak, rate),
             waterfall: super::decay::Waterfall::new(&ir, peak, rate),
+            modes: super::modes::find(&ir, peak, rate),
         })
     }
 }

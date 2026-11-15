@@ -4,6 +4,7 @@ pub mod ambient;
 pub mod biquad;
 pub mod decay;
 pub mod level;
+pub mod modes;
 pub mod noise;
 pub mod periodic;
 pub mod room;

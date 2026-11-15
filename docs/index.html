@@ -532,6 +532,7 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
         <h3 style="margin-top:0">Decay waterfall <kbd>w</kbd></h3>
         <p>How each bass note fades after the sound stops. The back slice is the sound as it starts; each slice in front is 20 ms later. Most notes vanish within a few slices; a resonance stands out as a ridge that runs all the way to the front.</p>
         <p>Notes that ring much longer than the rest sound boomy and smear the bass line. The list beside the waterfall names them. EQ cuts lower them; bass traps in corners, or moving things with <kbd>p</kbd>, treat the cause.</p>
+        <p>The waterfall shows the first 400 ms, but a room's lowest resonances can ring for well over a second. Those are measured on their own, however long they last: each one's time to fade 60 dB, next to the rest of the room's, from how its energy dies away and, as a cross-check, from how narrow its peak is. In one real living room, the length mode at 33 Hz rang for 1.7 s and the width mode at 45 Hz for 1.5 s, while everything else faded in 0.6 s.</p>
         <p><kbd>Tab</kbd> switches speakers on one shared scale, so a quieter speaker sits lower, and it works on saved sessions too: <code>correctsound review</code>, then <kbd>w</kbd>.</p>
       </div>
     </div>

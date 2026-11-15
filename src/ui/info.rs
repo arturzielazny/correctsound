@@ -98,7 +98,9 @@ fn simple_lines() -> Vec<Line<'static>> {
         p(
             "A waterfall of the bass: how each note fades after the sound stops. Notes that \
            ring much longer than the rest sound boomy; the list beside it names them. EQ cuts \
-           lower them; bass traps or moving things treat the cause.",
+           lower them; bass traps or moving things treat the cause. The waterfall shows the \
+           first 400 ms; the room's lowest resonances (modes) are also measured on their own, \
+           however long they ring, as the time to fade 60 dB.",
         ),
         gap(),
         h("What EQ can and cannot do"),
@@ -290,6 +292,19 @@ fn technical_lines() -> Vec<Line<'static>> {
            as ringing). Ringing: local peaks of the fade time from 30 to 300 Hz over 1.5 times \
            the median and 100 ms, which halfway through their fade are also peaks in their \
            slice.",
+        ),
+        p(
+            "Room modes, for decays past the waterfall's 400 ms: peaks from 20 to 150 Hz in the \
+           spectrum of the first 4 s of the impulse response (2^20-point FFT, 0.05 Hz) that \
+           stand 15 dB above its noise floor (from 4–5 s) and 4 dB above their valleys. Each \
+           is measured twice. Energy decay: demodulated to 0 Hz, low-passed at 6 % of its \
+           frequency (at least 2 Hz, 8th order) backwards in time, Schroeder-integrated with \
+           the noise removed, T30, T20 or T15 by how far it clears the noise. Peak width: \
+           T60 = 3·ln10/(π·Δf₋₃dB). The energy decay is shown unless it only managed a T15 and \
+           disagrees with the width by a third; when the two disagree both are shown. Peaks \
+           narrower than 4 s can resolve (T60 over 3.5 s) are steady hums, not modes. Merged \
+           over mic positions by median. On synthetic modes both are within 1–2 % alone and \
+           15 % for modes a fifth of an octave apart.",
         ),
         gap(),
         p("Press m for the plain version, Esc to close."),

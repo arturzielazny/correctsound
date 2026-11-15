@@ -1232,6 +1232,7 @@ fn decay(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Graphics) {
         )));
         lines.push(Line::from(""));
     }
+    let modes = app.modes(c);
     if ringing.is_empty() {
         lines.push(Line::from(ok("No note rings much longer")));
         lines.push(Line::from("  than the rest."));
@@ -1240,17 +1241,41 @@ fn decay(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Graphics) {
             "Rings longest",
             Style::default().bold(),
         )));
-        for r in ringing.iter().take(8) {
-            let full = if r.fade_ms >= w.times_ms.last().copied().unwrap_or(400.0) - 1e-6 {
-                "≥"
-            } else {
-                " "
+        let longest = w.times_ms.last().copied().unwrap_or(400.0) - 1e-6;
+        for r in ringing.iter().take(6) {
+            // The waterfall stops at 400 ms; a mode measured on its own says how long.
+            let time = match crate::dsp::modes::near(&modes, r.hz) {
+                Some(m) if r.fade_ms >= longest => m.fade_20_text(),
+                _ if r.fade_ms >= longest => format!("≥{:.0} ms", r.fade_ms),
+                _ => format!("{:.0} ms", r.fade_ms),
             };
-            lines.push(Line::from(format!(
-                "  {:>6.0} Hz  {full}{:>4.0} ms",
-                r.hz, r.fade_ms
+            lines.push(Line::from(format!("  {:>6.0} Hz  {time:>9}", r.hz)));
+        }
+    }
+    if !modes.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Room modes: time to fade 60 dB",
+            Style::default().bold(),
+        )));
+        for m in &modes {
+            let color = if m.t60_s > 1.0 {
+                Color::LightRed
+            } else if m.t60_s > 0.6 {
+                Color::Yellow
+            } else {
+                Color::Reset
+            };
+            lines.push(Line::from(Span::styled(
+                format!("  {:>6.1} Hz  {:>9}", m.hz, m.t60_text()),
+                Style::default().fg(color),
             )));
         }
+        if let Some(rt) = app.typical_reverb_s(c) {
+            lines.push(Line::from(format!("  the room elsewhere: {rt:.1} s")));
+        }
+    }
+    if !ringing.is_empty() || modes.iter().any(|m| m.t60_s > 0.6) {
         lines.push(Line::from(""));
         lines.push(Line::from("EQ cuts lower these notes, which also"));
         lines.push(Line::from("shortens what you hear of them. Bass"));

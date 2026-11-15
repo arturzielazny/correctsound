@@ -108,6 +108,9 @@ is that every port adds a module under `src/platform/` and leaves the rest alone
   reading across the room, and the most even curve so far kept in faded green.
 - **Decay (waterfall) view** (`w`): cumulative spectral decay of the bass, and the notes
   that ring longest, also listed in the curiosities and `report.txt`.
+- **Room modes' true decay**: peaks from 20 to 150 Hz measured past the waterfall's
+  400 ms, by energy decay (demodulated, steep backwards low-pass, Schroeder) and by peak
+  width, merged over mic positions. On a real room both gave 1.7 s for a 33 Hz mode.
 
 ## Earlier ideas
 

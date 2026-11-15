@@ -983,6 +983,28 @@ impl App {
         crate::dsp::decay::Waterfall::average(&all)
     }
 
+    /// The room modes heard from speaker `c`, merged over its mic positions.
+    #[must_use]
+    pub fn modes(&self, c: usize) -> Vec<crate::dsp::modes::Mode> {
+        let all: Vec<&[crate::dsp::modes::Mode]> = self.measure.positions[c]
+            .iter()
+            .map(|a| a.modes.as_slice())
+            .collect();
+        crate::dsp::modes::merge(&all)
+    }
+
+    /// The room's typical reverberation time for speaker `c`, s: the median of its
+    /// per-octave T60s (125 Hz–4 kHz) over the mic positions.
+    #[must_use]
+    pub fn typical_reverb_s(&self, c: usize) -> Option<f64> {
+        let mut all: Vec<f64> = self.measure.positions[c]
+            .iter()
+            .flat_map(|a| a.decay.iter().map(|d| d.1))
+            .collect();
+        all.sort_by(f64::total_cmp);
+        all.get(all.len() / 2).copied()
+    }
+
     /// The simulated wall distance, when simulating.
     #[must_use]
     pub fn sim_wall_m(&self) -> Option<f64> {
