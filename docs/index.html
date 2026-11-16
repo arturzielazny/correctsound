@@ -186,6 +186,16 @@ pre { background: var(--bg-2); border: 1px solid var(--line); border-radius: 10p
 table { border-collapse: collapse; width: 100%; font-size: .95rem; }
 td, th { border-bottom: 1px solid var(--line); padding: 10px 8px; text-align: left; vertical-align: top; }
 th { color: var(--fg); }
+/* What's new: a date beside each day's changes; stacked on a phone. */
+.changes { display: grid; grid-template-columns: 120px 1fr; gap: 6px 22px; margin-top: 18px; }
+.changes dt { color: var(--muted); font-size: .92rem; padding-top: 3px; }
+.changes dd { margin: 0 0 14px; }
+.changes ul { margin: 0; padding-left: 18px; }
+.changes li { margin: 3px 0; }
+@media (max-width: 640px) {
+  .changes { grid-template-columns: 1fr; }
+  .changes dd { margin-bottom: 18px; }
+}
 footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--muted); font-size: .92rem; }
 .lightbox { position: fixed; inset: 0; background: rgba(10,10,16,.92); display: none; align-items: center; justify-content: center; z-index: 50; padding: 20px; cursor: zoom-out; }
 .lightbox.on { display: flex; }
@@ -198,6 +208,7 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
   <div class="wrap">
     <a class="brand" href="#"><svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#24283b"/><path d="M4 20 Q9 6 13 18 T22 14 T28 16" fill="none" stroke="#7dcfff" stroke-width="2.6" stroke-linecap="round"/></svg>CorrectSound</a>
     <div class="links">
+      <a href="#new">What's new</a>
       <a href="#how">How it works</a>
       <a href="#tour">Tour</a>
       <a href="#treatment">Room treatment</a>
@@ -228,6 +239,38 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
     <figcaption>The result screen, running on the built-in simulator. Orange is what the mic heard, blue is what you will hear with the correction, and the lower chart is the equalizer itself.</figcaption>
   </div>
 </header>
+
+<section id="new">
+  <div class="wrap">
+    <div class="eyebrow">What's new</div>
+    <h2>Recent changes</h2>
+    <dl class="changes">
+      <dt>16 Nov 2026</dt>
+      <dd><ul>
+        <li><a href="#room">Your room from above</a> (<kbd>r</kbd>): the room's size and where the speakers stand, guessed from the measurement alone, the standing waves, and where to sit. Enter your own numbers as you would measure them; <kbd>m</kbd> mirrors the setup.</li>
+        <li><a href="#treatment">Placement</a> measures with sweeps only, in three speeds; the fastest updates ten times a second. Every line on its screen stays in place.</li>
+        <li><a href="#ultrawide">Ultrawide monitors</a>: charts use the whole width.</li>
+        <li>Setting the level is quicker, and louder than the room needs is fine up to 85 dB.</li>
+        <li>Each mic position shows faintly behind the average.</li>
+        <li>A warning when the selected output is not the one your last measurement used.</li>
+      </ul></dd>
+      <dt>15 Nov 2026</dt>
+      <dd><ul>
+        <li>The measurement level comes from your room's background noise: often 60 dB instead of 75.</li>
+        <li>How long the room's lowest resonances really ring, however long that is.</li>
+        <li>Fast sweeps, and a big number to read from across the room while you move things.</li>
+      </ul></dd>
+      <dt>14 Nov 2026</dt>
+      <dd><ul>
+        <li>Live placement for <a href="#treatment">room treatment</a>.</li>
+        <li>Built and tested on Linux, macOS and Windows; <a href="#where">what works where</a>.</li>
+      </ul></dd>
+      <dt>13 Nov 2026</dt>
+      <dd><ul><li>First release.</li></ul></dd>
+    </dl>
+    <p class="muted" style="margin-top:4px">Every change: <a href="https://github.com/arturzielazny/correctsound/commits/main">the history on GitHub</a>.</p>
+  </div>
+</section>
 
 <section id="why">
   <div class="wrap">
