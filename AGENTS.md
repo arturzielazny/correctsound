@@ -51,6 +51,20 @@ The two interfaces a platform implements:
 Words the user sees about the OS come from the platform too: `GainSetting` labels,
 `EqHost::name`, `System::input_gain_help`, `Routing::Wrong` messages.
 
+## Implementation notes worth knowing
+
+- On Linux, audio runs through `pw-cat` subprocesses instead of the `pipewire` crate. Both
+  streams set `node.dont-move`; without it, EasyEffects re-routes any new output stream into
+  its own sink, and the measurement would include the existing EQ. The playback stream's links
+  are checked during every sweep, and the sweep is abandoned if it reaches anything except the
+  chosen output.
+- The UMIK-1's 0° calibration URL is `…/umikcal/umik.php/<serial>.txt` (not `umik00.php`); an
+  unknown serial returns HTTP 200 with an HTML error, which is detected.
+- SPL = dBFS + 124 − sensitivity factor (matches REW on a current UMIK-1). Older 18 dB-gain
+  mics are marked approximate. The EQ only depends on the response's shape, not this constant.
+- Filters use EasyEffects' `APO (DR)` bell mode, the RBJ cookbook filter the fitter models, so
+  the prediction matches what EasyEffects does.
+
 ## Adding a platform
 
 1. Read `src/platform/mod.rs`, `src/platform/linux/` and `src/platform/sim.rs`.

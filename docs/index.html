@@ -62,8 +62,10 @@ section { padding: 88px 0; border-top: 1px solid var(--line); }
 nav.top { position: sticky; top: 0; z-index: 10; background: rgba(22,22,30,.82); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
 nav.top .wrap { display: flex; align-items: center; gap: 22px; height: 58px; }
 nav.top .brand { color: var(--fg); font-weight: 800; display: flex; align-items: center; gap: 10px; }
-nav.top .links { display: flex; gap: 20px; margin-left: auto; font-size: .93rem; }
-nav.top .links a { color: var(--fg-2); }
+nav.top .links { display: flex; align-items: center; gap: 20px; margin-left: auto; font-size: .93rem; }
+nav.top .links a { color: var(--fg-2); white-space: nowrap; }
+/* Narrower screens keep the links people use most; the rest are a scroll away. */
+@media (max-width: 1180px) { nav.top .links a.minor { display: none; } }
 nav.top .gh { padding: 6px 14px; border: 1px solid var(--line); border-radius: 999px; color: var(--fg) !important; }
 @media (max-width: 760px) { nav.top .links a:not(.gh) { display: none; } }
 
@@ -209,12 +211,13 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
     <a class="brand" href="#"><svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#24283b"/><path d="M4 20 Q9 6 13 18 T22 14 T28 16" fill="none" stroke="#7dcfff" stroke-width="2.6" stroke-linecap="round"/></svg>CorrectSound</a>
     <div class="links">
       <a href="#new">What's new</a>
-      <a href="#how">How it works</a>
+      <a class="minor" href="#how">How it works</a>
       <a href="#tour">Tour</a>
       <a href="#treatment">Room treatment</a>
       <a href="#room">Your room</a>
-      <a href="#science">The science</a>
-      <a href="#yours">Make it yours</a>
+      <a class="minor" href="#science">The science</a>
+      <a class="minor" href="#yours">Make it yours</a>
+      <a href="https://github.com/arturzielazny/correctsound/discussions">Discussions</a>
       <a class="gh" href="https://github.com/arturzielazny/correctsound">GitHub</a>
     </div>
   </div>
@@ -253,6 +256,7 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
         <li>Setting the level is quicker, and louder than the room needs is fine up to 85 dB.</li>
         <li>Each mic position shows faintly behind the average.</li>
         <li>A warning when the selected output is not the one your last measurement used.</li>
+        <li><a href="https://github.com/arturzielazny/correctsound/discussions">Discussions</a> are open: ask, share your room, suggest ideas.</li>
       </ul></dd>
       <dt>15 Nov 2026</dt>
       <dd><ul>
@@ -919,7 +923,7 @@ correctsound review          # open the newest again, re-analysed, nothing playe
       <tr><td><kbd>Enter</kbd></td><td>everywhere</td><td>the screen's main action</td></tr>
       <tr><td><kbd>a</kbd></td><td>measure / save</td><td>add a mic position / apply in EasyEffects</td></tr>
       <tr><td><kbd>p</kbd></td><td>measure</td><td>live placement and room treatment</td></tr>
-      <tr><td><kbd>m</kbd></td><td>placement</td><td>mode: sweeps, fast sweeps or live noise</td></tr>
+      <tr><td><kbd>m</kbd></td><td>placement</td><td>mode: sweeps, fast sweeps or fastest sweeps</td></tr>
       <tr><td><kbd>t</kbd> <kbd>h</kbd> <kbd>f</kbd> <kbd>d</kbd></td><td>result</td><td>tilt, high limit, filter count, back to automatic</td></tr>
       <tr><td><kbd>v</kbd></td><td>save</td><td>verify through EasyEffects</td></tr>
       <tr><td><kbd>c</kbd> <kbd>w</kbd> <kbd>r</kbd> <kbd>i</kbd></td><td>after measuring</td><td>curiosities, decay waterfall, the room from above, how it works</td></tr>
@@ -944,6 +948,8 @@ correctsound review          # open the newest again, re-analysed, nothing playe
     <p>It runs on any Linux distribution with PipeWire, not just Arch; EasyEffects is optional. On macOS and Windows it builds and the simulator works today, but measuring real speakers needs a platform module, one folder under <code>src/platform/</code>. <a href="#platforms">Here is how</a>, with a prompt for your AI agent.</p>
     <h3>Can I use another mic?</h3>
     <p>Yes: <code>--cal-file</code> and <code>--source</code> take any calibration file and PipeWire input. Automatic detection and download are UMIK-1 only for now.</p>
+    <h3>Where can I ask, or show my results?</h3>
+    <p>In <a href="https://github.com/arturzielazny/correctsound/discussions">Discussions</a> on GitHub: questions, your room's before and after, ideas, a port you are working on. Something broken? Open an <a href="https://github.com/arturzielazny/correctsound/issues">issue</a>, and if you can, attach the session folder's <code>report.txt</code> (it holds no recordings).</p>
     <h3>Patents?</h3>
     <p>A brief, non-lawyer look found nothing this needs a licence for. The methods are published and decades old: exponential sweeps (Farina, 2000), regularised inversion (Kirkeby, 1998), the RBJ filter cookbook, Schroeder integration (1965), cumulative spectral decay (1970s), averaging positions, cross-validation. Audyssey's multi-position averaging patent (US 8,005,228) is listed as expired; Sonos' calibration patents cover networked speakers calibrated with a moving phone, which this isn't. Not legal advice.</p>
   </div>
@@ -951,7 +957,7 @@ correctsound review          # open the newest again, re-analysed, nothing playe
 
 <footer>
   <div class="wrap">
-    <p><b style="color:var(--fg)">CorrectSound</b> · <a href="https://github.com/arturzielazny/correctsound">GitHub</a> · <a href="https://github.com/arturzielazny/correctsound/blob/main/LICENSE">MIT licence</a> · <a href="https://github.com/arturzielazny/correctsound/blob/main/CONTRIBUTING.md">Contributing</a></p>
+    <p><b style="color:var(--fg)">CorrectSound</b> · <a href="https://github.com/arturzielazny/correctsound">GitHub</a> · <a href="https://github.com/arturzielazny/correctsound/discussions">Discussions</a> · <a href="https://github.com/arturzielazny/correctsound/blob/main/LICENSE">MIT licence</a> · <a href="https://github.com/arturzielazny/correctsound/blob/main/CONTRIBUTING.md">Contributing</a></p>
     <p>Written by Claude (Anthropic), an AI coding agent, and tested by a human on real speakers. Screenshots come from the built-in simulator, generated by <code>cargo run --example screenshots</code>.</p>
   </div>
 </footer>
