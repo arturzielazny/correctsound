@@ -18,7 +18,14 @@ pub struct Responses {
     /// which corrections hold across positions).
     #[serde(default)]
     pub positions: Vec<Response>,
+    /// Each mic position on its own at the display smoothing, when there are several: shown
+    /// faintly behind their average.
+    #[serde(default)]
+    pub positions_display: Vec<Response>,
 }
+
+/// Smoothing of the curves shown: 1/48 octave, fine enough to show every room resonance.
+const DISPLAY_SMOOTHING: Smoothing = Smoothing::Fixed(1.0 / 48.0);
 
 /// Power-averages the positions of one channel and applies calibration.
 ///
@@ -48,16 +55,20 @@ pub fn responses(
         }
         r
     };
-    Responses {
-        display: finish(&power, Smoothing::Fixed(1.0 / 48.0)),
-        fit: finish(&power, Smoothing::Variable),
-        positions: if positions.len() > 1 {
+    let each = |smoothing: Smoothing| {
+        if positions.len() > 1 {
             positions
                 .iter()
-                .map(|a| finish(&a.power, Smoothing::Variable))
+                .map(|a| finish(&a.power, smoothing))
                 .collect()
         } else {
             Vec::new()
-        },
+        }
+    };
+    Responses {
+        display: finish(&power, DISPLAY_SMOOTHING),
+        fit: finish(&power, Smoothing::Variable),
+        positions: each(Smoothing::Variable),
+        positions_display: each(DISPLAY_SMOOTHING),
     }
 }

@@ -50,13 +50,13 @@ More screens:
   and over with an evenness score. **Walk around with a bass trap and see what it does right
   away**: pin the room as it is with Space, put the trap in a corner, and the curve shows the
   difference. The same works for moving the speakers or your seat. A big number says how
-  many dB more even than the pinned state it is, readable from across the room, and the most
-  even curve so far stays on the chart in faded green. Three modes, switched with `m`:
+  many dB more even than the pinned state it is, readable from across the room, and the
+  pinned curve stays on the chart behind the latest. Three modes, all sweeps, switched with `m`:
   *sweeps* (a short sweep every couple of seconds, fine detail, and a waterfall showing how
   long each note rings, compared with the pinned sweep), *fast sweeps* (a one-second sweep
-  looping without pauses, curve and waterfall updated five times a second) and *live*
-  (bass-only periodic noise without a break; the curve follows a change within about half a
-  second). Below about 200 Hz the room decides what you hear, and this is the only cure for
+  looping without pauses, curve and waterfall updated five times a second) and *fastest
+  sweeps* (a third-of-a-second bass sweep looping, the curve updated ten times a second and
+  following a change within about half a second, with only a rough waterfall). Below about 200 Hz the room decides what you hear, and this is the only cure for
   the dips no EQ can fill.
 - `w` **Decay**: a waterfall of the bass, how each note fades after the sound stops, and the
   notes that ring longest. The room's lowest resonances (modes) are also measured on their
@@ -65,11 +65,13 @@ More screens:
 - `r` **Room**: your room seen from above, to scale, with the speakers and your seat.
   From the measurement alone it guesses the room's floor plan and where the speakers stand
   (on a real living room: the floor plan within 2 % and the right corner), and lists its
-  guesses under your own rooms (`g`/`G`). Change a guess's numbers with a tape measure and it
-  becomes your room, saved in `config.toml` and with the session. Then it names every resonance ("33 Hz: side to side, 5.24 m"), shows where
+  guesses under your own rooms (`g`/`G`). Change a guess's numbers with a tape measure (the
+  speakers from the wall behind and the nearer side wall, their spacing, your seat from them;
+  `m` mirrors the setup to the other wall) and it becomes your room, saved in `config.toml` and with the session. Then it names every resonance ("33 Hz: side to side, 5.24 m"), shows where
   each standing wave is loud (where bass traps work), says how well its model of the room
   matches the measurement, and, when it does, whether another seat or moving the whole setup
-  would make the bass more even. `v` switches to a map of how even the bass is at each seat.
+  would make the bass more even. `v` shows where to sit: every spot coloured by how even the bass below 80 Hz would be if
+  you sat there, with the speakers where they are.
 - `c` **Curiosities**: the room's resonances and the room dimensions they suggest,
   reverberation time per octave, the strongest early reflection, ringing notes,
   cancellations and broad dips with their likely cause, the speakers' bass and treble

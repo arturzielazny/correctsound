@@ -157,11 +157,12 @@ fn room_hints(app: &App) -> String {
         return "Enter set   Backspace   Esc cancel".to_owned();
     }
     let mut keys = vec!["↑/↓ number", "←/→ ±5 cm", "or type metres"];
+    keys.push("m mirror");
     keys.push("g/G other rooms");
     match r.view {
         crate::app::room::PlanView::Mode => {
             keys.push("[ ] standing wave");
-            keys.push("v seat map");
+            keys.push("v where to sit");
         }
         crate::app::room::PlanView::Seats => keys.push("v standing waves"),
     }
@@ -875,6 +876,14 @@ fn measure(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Graphics) {
         status,
     );
     let mut curves = Vec::new();
+    // Each mic position faintly, behind the averages.
+    for c in Channel::BOTH {
+        if let Some(r) = &m.responses[c.index()] {
+            for p in &r.positions_display {
+                curves.push(Curve::new("", Series::Position(c), &p.freqs, &p.db));
+            }
+        }
+    }
     for (c, series) in [
         (Channel::Left, Series::Left),
         (Channel::Right, Series::Right),
@@ -888,10 +897,19 @@ fn measure(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Graphics) {
             ));
         }
     }
+    let several = m
+        .responses
+        .iter()
+        .flatten()
+        .any(|r| !r.positions_display.is_empty());
     plot::draw(
         frame,
         plot_area,
-        "Measured response, dB SPL",
+        if several {
+            "Measured response, dB SPL: the average of the mic positions, each one faint"
+        } else {
+            "Measured response, dB SPL"
+        },
         &curves,
         &[],
         gfx,
@@ -919,48 +937,63 @@ fn placement(
     } else {
         (status, None)
     };
+    // Every row keeps its place, with a dim placeholder until it has something to say, so
+    // nothing pops in and out while you watch from across the room.
+    let dim = |text: &str| Span::styled(text.to_owned(), Style::default().fg(Color::DarkGray));
     let intro = match p.mode {
         Mode::Sweeps => {
-            "Sweeps: a bass sweep every couple of seconds while you move the speakers or your \
-             seat by 10–50 cm, or try a bass trap in each corner. The waterfall shows how the \
-             bass decays: traps shorten the ringing."
+            "A bass sweep every couple of seconds: the finest detail and the waterfall. Keep still \
+             while it plays."
         }
         Mode::Fast => {
-            "Fast sweeps: a one-second sweep loops without pauses; the curve and the waterfall \
-             are recomputed five times a second, so a change shows within a second, decay \
-             included."
+            "A one-second sweep in a loop, updated five times a second: a change shows within a \
+             second, decay included."
         }
-        Mode::Live => {
-            "Live: bass noise plays continuously and the curve is recomputed ten times a second, \
-             so it follows a bass trap as you carry it. Sweeps show finer detail and the decay."
+        Mode::Fastest => {
+            "A third-of-a-second sweep in a loop, updated ten times a second: it follows a bass \
+             trap as you carry it. Its waterfall is only rough."
         }
     };
     let mut lines = vec![
-        Line::from(intro),
         Line::from(
-            "Space pins a placement to compare with; keep the one with the smaller number (peaks \
-             and dips, not level). Faded green: the most even so far. m changes the mode.",
+            "Move the speakers or your seat by 10–50 cm, or try a bass trap in each corner. Space \
+             pins a placement to compare with; keep the one with the smaller number (peaks and \
+             dips, not level).",
         ),
         Line::from(""),
     ];
-    let speaker = p.channel.name().to_lowercase();
-    let (label, state) = match (p.mode, p.paused, p.running()) {
-        (_, true, _) => (String::new(), "paused (s resumes)".to_owned()),
-        (Mode::Sweeps, false, true) => (
-            format!("Sweep {}  ", p.count),
-            format!("sweeping the {speaker} speaker…"),
-        ),
-        (Mode::Fast, false, true) => (
-            format!("Fast sweeps, {} updates  ", p.count),
-            format!("sweeping the {speaker} speaker in a loop"),
-        ),
-        (Mode::Live, false, true) => (
-            format!("Live, {} updates  ", p.count),
-            format!("noise from the {speaker} speaker"),
-        ),
-        (_, false, false) => (String::new(), "starting…".to_owned()),
+    // The modes, the current one lit, and what it does.
+    let mut modes = vec![Span::raw("Mode (m): ")];
+    for (i, m) in [Mode::Sweeps, Mode::Fast, Mode::Fastest]
+        .into_iter()
+        .enumerate()
+    {
+        if i > 0 {
+            modes.push(dim(" · "));
+        }
+        modes.push(if m == p.mode {
+            Span::styled(m.name(), Style::default().fg(ACCENT).bold())
+        } else {
+            dim(m.name())
+        });
+    }
+    lines.push(Line::from(modes));
+    lines.push(Line::from(intro));
+    let speaker = p.channel.name();
+    let state = if p.paused {
+        Span::styled("paused (s resumes)", Style::default().fg(Color::Yellow))
+    } else {
+        let what = if p.mode == Mode::Sweeps {
+            "sweeps"
+        } else {
+            "updates"
+        };
+        Span::raw(format!(
+            "{speaker} speaker (Tab: other), {} {what}",
+            p.count
+        ))
     };
-    let mut head = vec![Span::raw(label), Span::raw(state)];
+    let mut head = vec![state];
     if let Some(d) = app.sim_wall_m() {
         head.push(Span::styled(
             format!("   simulated speakers {:.0} cm from the wall", d * 100.0),
@@ -974,66 +1007,56 @@ fn placement(
             s.evenness_db, s.deepest.1, s.deepest.0, s.highest.1, s.highest.0
         )
     };
-    if let Some(r) = &p.latest {
-        let mut spans = vec![
-            Span::raw(format!(
-                "Now ({}, {SCORE_FROM_HZ:.0}–{SCORE_TO_HZ:.0} Hz): ",
-                r.channel.name()
-            )),
-            Span::styled(score_text(&r.score), Style::default().bold()),
-        ];
-        // The comparison is in the big number when there is room for it.
-        if let Some(pinned) = p.reference.as_ref().filter(|_| big_area.is_none()) {
-            let (text, color) = compared(r.score.evenness_db, pinned.score.evenness_db);
-            spans.push(Span::styled(
-                format!("  {text}"),
-                Style::default().fg(color),
-            ));
+    lines.push(match &p.latest {
+        Some(r) => {
+            let mut spans = vec![
+                Span::raw(format!(
+                    "Now ({}, {SCORE_FROM_HZ:.0}–{SCORE_TO_HZ:.0} Hz): ",
+                    r.channel.name()
+                )),
+                Span::styled(score_text(&r.score), Style::default().bold()),
+            ];
+            // The comparison is in the big number when there is room for it.
+            if let Some(pinned) = p.reference.as_ref().filter(|_| big_area.is_none()) {
+                let (text, color) = compared(r.score.evenness_db, pinned.score.evenness_db);
+                spans.push(Span::styled(
+                    format!("  {text}"),
+                    Style::default().fg(color),
+                ));
+            }
+            Line::from(spans)
         }
-        lines.push(Line::from(spans));
-    }
-    if let Some(r) = &p.reference {
-        lines.push(Line::from(Span::styled(
+        None => Line::from(dim("Now: waiting for the first reading…")),
+    });
+    lines.push(match &p.reference {
+        Some(r) => Line::from(Span::styled(
             format!("Pinned ({}): {}", r.channel.name(), score_text(&r.score)),
             Style::default().fg(Color::Gray),
-        )));
-    }
-    // The best so far, when it is clearly better than now and not the pinned one itself.
-    let best = p.best_other_than_latest().filter(|b| {
-        Some(*b) != p.reference.as_ref()
-            && p.latest
-                .as_ref()
-                .is_none_or(|l| b.score.evenness_db < l.score.evenness_db - SAME_DB)
+        )),
+        None => Line::from(dim("Pinned: nothing yet; Space pins the latest reading")),
     });
-    if let Some(b) = best {
-        let mut text = format!(
-            "Best so far ({}): {}",
-            b.channel.name(),
-            score_text(&b.score)
-        );
-        if let Some(pinned) = p.reference.as_ref().filter(|_| big_area.is_none()) {
-            text = format!(
-                "{text}, {}",
-                compared(b.score.evenness_db, pinned.score.evenness_db).0
-            );
-        }
-        lines.push(Line::from(Span::styled(
-            text,
-            Style::default().fg(Series::Best.color(gfx)),
-        )));
-    }
     let latest_decay = p.latest.as_ref().and_then(|r| r.waterfall.as_ref());
-    if p.mode != Mode::Live
-        && let Some(w) = latest_decay
-    {
-        lines.push(decay_line(
+    let rough = p.latest.as_ref().is_some_and(|r| r.mode == Mode::Fastest);
+    lines.push(match latest_decay {
+        Some(_) if rough => Line::from(dim(
+            "Decay: rough in this mode (the loop is shorter than the room rings); fast sweeps \
+             give ringing times",
+        )),
+        Some(w) => decay_line(
             w,
-            p.reference.as_ref().and_then(|r| r.waterfall.as_ref()),
-        ));
-    }
-    if let Some(issue) = &p.issue {
-        lines.push(Line::from(bad(issue)));
-    }
+            p.reference
+                .as_ref()
+                .filter(|r| r.mode != Mode::Fastest)
+                .and_then(|r| r.waterfall.as_ref()),
+        ),
+        None => Line::from(dim("Decay: after the first reading")),
+    });
+    // Problems stay a few seconds (see PlacementState::report); otherwise a quiet all-clear.
+    lines.push(match (&p.issue, &p.latest) {
+        (Some(issue), _) => Line::from(bad(issue)),
+        (None, Some(_)) => Line::from(dim("✔ the sweep reaches the mic cleanly")),
+        (None, None) => Line::from(""),
+    });
     frame.render_widget(
         Paragraph::new(lines)
             .block(panel("Placement"))
@@ -1041,17 +1064,9 @@ fn placement(
         text_area,
     );
     if let Some(area) = big_area {
-        big_score(frame, area, p, gfx);
+        big_score(frame, area, p);
     }
     let mut curves = Vec::new();
-    if let Some(b) = best {
-        curves.push(Curve::new(
-            "best",
-            Series::Best,
-            &b.response.freqs,
-            &b.response.db,
-        ));
-    }
     if let Some(r) = &p.reference {
         curves.push(Curve::new(
             "pinned",
@@ -1075,8 +1090,8 @@ fn placement(
         .map(|r| Curve::new("", Series::Reference, &r.freqs, &r.db))
         .collect();
     scaled.extend(curves.iter().cloned());
-    let (curve_area, decay_area) = match (p.mode, latest_decay) {
-        (Mode::Sweeps | Mode::Fast, Some(w)) => {
+    let (curve_area, decay_area) = match latest_decay {
+        Some(w) => {
             let [a, b] =
                 Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)])
                     .areas(plot_area);
@@ -1100,7 +1115,11 @@ fn placement(
         plot::draw_decay(
             frame,
             area,
-            "How the bass fades, latest sweep",
+            if rough {
+                "How the bass fades: rough, the first 120 ms"
+            } else {
+                "How the bass fades, latest sweep"
+            },
             plot::Decay {
                 times_ms: &w.times_ms,
                 freqs: &w.freqs,
@@ -1136,7 +1155,7 @@ fn compared(now_db: f64, pinned_db: f64) -> (String, Color) {
 /// The number that matters while moving things, big enough to read from across the room:
 /// how much more even than the pinned reading the latest one is, or without a pin, how
 /// uneven it is.
-fn big_score(frame: &mut Frame<'_>, area: Rect, p: &crate::app::PlacementState, gfx: &Graphics) {
+fn big_score(frame: &mut Frame<'_>, area: Rect, p: &crate::app::PlacementState) {
     let Some(now) = &p.latest else {
         frame.render_widget(panel("Evenness"), area);
         return;
@@ -1163,15 +1182,6 @@ fn big_score(frame: &mut Frame<'_>, area: Rect, p: &crate::app::PlacementState, 
         caption,
         Style::default().fg(color),
     )));
-    if let (Some(best), Some(pinned)) = (&p.best[p.channel.index()], &p.reference) {
-        lines.push(Line::from(Span::styled(
-            format!(
-                "best so far {:+.1} dB",
-                pinned.score.evenness_db - best.score.evenness_db
-            ),
-            Style::default().fg(Series::Best.color(gfx)),
-        )));
-    }
     // Centred vertically inside the border.
     let pad = usize::from(area.height.saturating_sub(2)).saturating_sub(lines.len()) / 2;
     lines.splice(0..0, std::iter::repeat_n(Line::from(""), pad));

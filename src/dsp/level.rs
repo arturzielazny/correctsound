@@ -130,6 +130,13 @@ impl LevelMeter {
         }
     }
 
+    /// Meter with 100 ms blocks and ~0.3 s averaging at `rate`: quick enough to follow an
+    /// amplifier's knob as it turns, steady to a few tenths of a dB on band-limited noise.
+    #[must_use]
+    pub fn quick(rate: u32) -> Self {
+        Self::new(rate as usize / 10, 3.0)
+    }
+
     /// Meter with 300 ms blocks and ~1 s averaging at `rate`.
     #[must_use]
     pub fn standard(rate: u32) -> Self {
@@ -189,6 +196,22 @@ mod tests {
         let mut m = LevelMeter::standard(48_000);
         m.push(&s);
         assert!(m.dbfs().expect("blocks completed").abs() < 0.01);
+    }
+
+    #[test]
+    fn the_quick_meter_follows_a_knob_within_a_second() {
+        let rate = 48_000;
+        let noise = crate::dsp::noise::pink_band(rate, 500.0, 2000.0, -20.0, 2);
+        let second = rate as usize;
+        let quiet: Vec<f32> = noise.iter().copied().cycle().take(second).collect();
+        let mut m = LevelMeter::quick(rate);
+        m.push(&quiet);
+        let before = m.dbfs().expect("a reading");
+        // The knob turned up 6 dB: within a second the reading is there.
+        let louder: Vec<f32> = quiet.iter().map(|v| v * 2.0).collect();
+        m.push(&louder);
+        let after = m.dbfs().expect("a reading");
+        assert!((after - before - 6.02).abs() < 0.5, "{before} → {after}");
     }
 
     #[test]

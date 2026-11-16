@@ -2,7 +2,7 @@
 //! theme's colours and shown through the terminal's graphics protocol (kitty in Ghostty and
 //! kitty, sixel in foot). Terminals without one get the braille charts instead.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::time::{Duration, Instant};
@@ -21,14 +21,21 @@ use super::theme::Theme;
 /// How long the terminal may take to answer the graphics query (Ghostty, kitty and foot
 /// answer within milliseconds; ratatui-image's default would delay startup by 2 s elsewhere).
 const QUERY_TIMEOUT: Duration = Duration::from_millis(500);
+/// Widest and tallest image sent as one, in cells. The kitty protocol's placeholders (how
+/// Ghostty and kitty show images in a text UI) number columns and rows up to 297; a chart
+/// wider than that, on an ultrawide monitor, is sent as tiles side by side.
+const MAX_TILE_CELLS: u16 = 256;
 
 /// Image support and the charts already sent to the terminal.
 pub struct Graphics {
     picker: Option<Picker>,
     theme: Theme,
     font: Option<FontVec>,
-    /// Per chart slot: the hash of what it shows (content and size) and its image.
-    cache: HashMap<String, (u64, Protocol)>,
+    /// Per chart slot: the hash of what it shows (content and size) and its image, in
+    /// tiles (offset in cells from the area's corner, and the tile).
+    cache: HashMap<String, (u64, Vec<(Rect, Protocol)>)>,
+    /// Chart slots drawn since [`Self::begin_frame`].
+    drawn: HashSet<String>,
     /// Cell size in pixels when charts are kept as images instead of sent to a terminal.
     offscreen: Option<(u16, u16)>,
     /// Charts drawn offscreen since [`Self::take_captured`]: where, and the image.
@@ -53,6 +60,7 @@ impl Graphics {
             theme: Theme::parse(""),
             font: None,
             cache: HashMap::new(),
+            drawn: HashSet::new(),
             offscreen: None,
             captured: Vec::new(),
         }
@@ -67,6 +75,7 @@ impl Graphics {
             theme,
             font,
             cache: HashMap::new(),
+            drawn: HashSet::new(),
             offscreen: Some(cell),
             captured: Vec::new(),
         }
@@ -103,6 +112,7 @@ impl Graphics {
             theme: Theme::load(),
             font,
             cache: HashMap::new(),
+            drawn: HashSet::new(),
             offscreen: None,
             captured: Vec::new(),
         }
@@ -144,6 +154,15 @@ impl Graphics {
         self.picker = Some(fresh);
     }
 
+    /// Call before drawing each frame. A chart that was off screen for a frame is sent to
+    /// the terminal again when it comes back: the terminal keeps only so many images (Ghostty
+    /// drops the oldest past its storage limit, which large charts on a 5K monitor reach
+    /// within seconds of placement updates), so the one sent earlier may be gone.
+    pub fn begin_frame(&mut self) {
+        let drawn = std::mem::take(&mut self.drawn);
+        self.cache.retain(|slot, _| drawn.contains(slot));
+    }
+
     /// Shows the chart `slot` in `area`. `content` identifies what it shows; the image is
     /// drawn again only when that or the area's size changes.
     pub fn chart(
@@ -169,6 +188,7 @@ impl Graphics {
             return;
         }
         let Some(picker) = &self.picker else { return };
+        self.drawn.insert(slot.to_owned());
         let cell = picker.font_size();
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         (content, area.width, area.height, cell.width, cell.height).hash(&mut hasher);
@@ -181,18 +201,79 @@ impl Graphics {
                 f32::from(cell.width),
             );
             render(&mut canvas, &self.theme, self.font.as_ref());
-            let size = Size::new(area.width, area.height);
-            match picker.new_protocol(canvas.into_image(), size, Resize::Fit(None)) {
-                Ok(p) => {
-                    self.cache.insert(slot.to_owned(), (key, p));
+            let image = canvas.into_image();
+            let parts: Option<Vec<(Rect, Protocol)>> = tiles(area.width, area.height)
+                .into_iter()
+                .map(|t| {
+                    let part = image.crop_imm(
+                        u32::from(t.x) * u32::from(cell.width),
+                        u32::from(t.y) * u32::from(cell.height),
+                        u32::from(t.width) * u32::from(cell.width),
+                        u32::from(t.height) * u32::from(cell.height),
+                    );
+                    let size = Size::new(t.width, t.height);
+                    let p = picker.new_protocol(part, size, Resize::Fit(None)).ok()?;
+                    Some((t, p))
+                })
+                .collect();
+            match parts {
+                Some(t) => {
+                    self.cache.insert(slot.to_owned(), (key, t));
                 }
-                Err(_) => {
+                None => {
                     self.cache.remove(slot);
                 }
             }
         }
-        if let Some((_, p)) = self.cache.get(slot) {
-            frame.render_widget(Image::new(p), area);
+        if let Some((_, parts)) = self.cache.get(slot) {
+            for (t, p) in parts {
+                let at = Rect::new(area.x + t.x, area.y + t.y, t.width, t.height);
+                frame.render_widget(Image::new(p), at);
+            }
         }
+    }
+}
+
+/// An area of `width` × `height` cells cut into tiles no larger than [`MAX_TILE_CELLS`],
+/// as offsets from its corner; one tile when it fits.
+fn tiles(width: u16, height: u16) -> Vec<Rect> {
+    let cuts = |len: u16| {
+        let n = len.div_ceil(MAX_TILE_CELLS).max(1);
+        // Equal tiles, the remainder spread over the first ones.
+        (0..n).scan(0, move |at, i| {
+            let size = len / n + u16::from(i < len % n);
+            let start = *at;
+            *at += size;
+            Some((start, size))
+        })
+    };
+    cuts(height)
+        .flat_map(|(y, h)| cuts(width).map(move |(x, w)| Rect::new(x, y, w, h)))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_wide_chart_is_cut_into_tiles_that_cover_it() {
+        assert_eq!(tiles(120, 40), vec![Rect::new(0, 0, 120, 40)]);
+        // An ultrawide terminal, 365 columns: two tiles side by side, no gap.
+        let t = tiles(365, 60);
+        assert_eq!(
+            t,
+            vec![Rect::new(0, 0, 183, 60), Rect::new(183, 0, 182, 60)]
+        );
+        let t = tiles(600, 300);
+        assert!(
+            t.iter()
+                .all(|r| r.width <= MAX_TILE_CELLS && r.height <= MAX_TILE_CELLS)
+        );
+        let area: u32 = t
+            .iter()
+            .map(|r| u32::from(r.width) * u32::from(r.height))
+            .sum();
+        assert_eq!(area, 600 * 300);
     }
 }

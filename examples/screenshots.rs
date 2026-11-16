@@ -24,6 +24,9 @@ use ratatui::style::{Color, Modifier};
 
 const COLS: u16 = 150;
 const ROWS: u16 = 44;
+/// An ultrawide monitor's terminal (5120×2160 is 2.4:1): wider than the 297 columns one
+/// kitty-protocol image can span, so its charts are sent in tiles.
+const WIDE: (u16, u16) = (320, 62);
 /// Cell size in pixels.
 const CELL: (u16, u16) = (12, 26);
 
@@ -96,13 +99,15 @@ fn main() {
     });
     app.message = None;
     shots.take(&app, "5b-placement");
-    // Fast sweeps: a sweep looping without pauses; then a worse placement, so the best one
-    // so far shows faded behind it.
+    // Fast sweeps: a sweep looping without pauses, on an ultrawide monitor too; then a worse
+    // placement, so the big number turns red.
     press(&mut app, KeyCode::Char('m'));
     let seen = app.placement.as_ref().map_or(0, |p| p.count);
     tick_until(&mut app, |a| {
         a.placement.as_ref().is_some_and(|p| p.count >= seen + 5)
     });
+    app.message = None;
+    shots.take_sized(&app, "5e-ultrawide", WIDE);
     for _ in 0..6 {
         press(&mut app, KeyCode::Right);
     }
@@ -115,14 +120,14 @@ fn main() {
     for _ in 0..6 {
         press(&mut app, KeyCode::Left);
     }
-    // Live mode: the same comparison, from noise, updated ten times a second.
+    // Fastest sweeps: the same comparison, from a short sweep looping, ten times a second.
     press(&mut app, KeyCode::Char('m'));
     let seen = app.placement.as_ref().map_or(0, |p| p.count);
     tick_until(&mut app, |a| {
         a.placement.as_ref().is_some_and(|p| p.count >= seen + 15)
     });
     app.message = None;
-    shots.take(&app, "5c-live");
+    shots.take(&app, "5c-fastest");
     press(&mut app, KeyCode::Esc);
 
     press(&mut app, KeyCode::Enter);
@@ -266,12 +271,17 @@ impl Shots {
     }
 
     fn take(&mut self, app: &App, name: &str) {
+        self.take_sized(app, name, (COLS, ROWS));
+    }
+
+    /// A screenshot of a terminal `size` cells (columns, rows) large.
+    fn take_sized(&mut self, app: &App, name: &str, size: (u16, u16)) {
         let mut gfx = Graphics::offscreen(
             self.theme.clone(),
             correctsound::ui::raster::load_font(),
             CELL,
         );
-        let mut terminal = Terminal::new(TestBackend::new(COLS, ROWS)).expect("test backend");
+        let mut terminal = Terminal::new(TestBackend::new(size.0, size.1)).expect("test backend");
         terminal
             .draw(|f| correctsound::ui::draw(f, app, &mut gfx))
             .expect("draw");
@@ -290,7 +300,7 @@ impl Shots {
             Some(_) => charts.clear(),
             None => {}
         }
-        let img = self.compose(terminal.backend().buffer(), &charts);
+        let img = self.compose(terminal.backend().buffer(), &charts, size);
         let path = self.out.join(format!("{name}.png"));
         save_png(&img, &path);
         println!("{}", path.display());
@@ -324,19 +334,20 @@ impl Shots {
         &self,
         buf: &ratatui::buffer::Buffer,
         charts: &[(ratatui::layout::Rect, image::DynamicImage)],
+        (cols, rows): (u16, u16),
     ) -> image::RgbaImage {
         let (cw, ch) = (f32::from(CELL.0), f32::from(CELL.1));
         let mut canvas = Canvas::new(
-            u32::from(COLS) * u32::from(CELL.0),
-            u32::from(ROWS) * u32::from(CELL.1),
+            u32::from(cols) * u32::from(CELL.0),
+            u32::from(rows) * u32::from(CELL.1),
             self.theme.background,
             cw,
         );
         let px = self.fonts.px;
         let sf = self.fonts.regular.as_scaled(PxScale::from(px));
         let text_top = (ch - (sf.ascent() - sf.descent())) / 2.0;
-        for y in 0..ROWS {
-            for x in 0..COLS {
+        for y in 0..rows {
+            for x in 0..cols {
                 let cell = &buf[(x, y)];
                 let (x0, y0) = (f32::from(x) * cw, f32::from(y) * ch);
                 let bg = self.color(cell.bg, false);

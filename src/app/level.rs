@@ -3,7 +3,6 @@
 //! for setting the amplifier to that level.
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
@@ -27,7 +26,7 @@ pub const NOISE_DBFS: f64 = -20.0;
 pub const NOISE_LOW_HZ: f64 = 500.0;
 pub const NOISE_HIGH_HZ: f64 = 2000.0;
 /// Recording skipped when listening starts, while the stream and filters settle.
-const LISTEN_SETTLE: usize = SAMPLE_RATE as usize * 3 / 10;
+const LISTEN_SETTLE: usize = SAMPLE_RATE as usize / 5;
 /// Background kept for the level in the meter's band: the last 3 s.
 const AMBIENT_KEEP: usize = SAMPLE_RATE as usize * 3;
 /// The suggestion moves down only by this much at once, dB, so it does not flicker; it
@@ -35,9 +34,12 @@ const AMBIENT_KEEP: usize = SAMPLE_RATE as usize * 3;
 const SUGGESTION_HYSTERESIS_DB: f64 = 2.0;
 /// Fade-in for every noise start, ms: short, so the meter shows the level quickly, while
 /// the safety limit ([`ABORT_SPL`]) still catches an amplifier left far too loud.
-const FADE_IN_MS: u64 = 1000;
-/// After the fade-in, the meter's averaging needs this long to settle, ms.
-const METER_SETTLE_MS: u64 = 1000;
+const FADE_IN_MS: u64 = 500;
+/// Recording after the fade-in starts before the meter starts afresh, ms: the fade plus
+/// the output's latency, so the quiet start does not drag the average down.
+const METER_RESTART_MS: u64 = FADE_IN_MS + 150;
+/// After that, the meter's averaging needs this long before a reading counts, ms.
+const METER_SETTLE_MS: u64 = 300;
 /// Above this the sweeps get uncomfortably loud over a whole measurement, and small
 /// speakers distort in the bass, dB SPL. Up to it, louder than the room needs is fine: the
 /// sweeps only gain margin over the background.
@@ -110,7 +112,9 @@ pub struct LevelState {
     settle: usize,
     /// The last few seconds of background, filtered to the meter's band.
     ambient: Vec<f32>,
-    started: Option<Instant>,
+    /// Samples recorded since the noise started: the meter's timing is counted in audio,
+    /// not clock time, so the simulator behaves like a room.
+    received: usize,
     noise: Arc<[f32]>,
     /// Limits the meter and the ambient reading to the noise's band.
     band: BandFilter,
@@ -141,11 +145,11 @@ impl LevelState {
             reviewed_set_spl: None,
             sink_volume: None,
             stream: None,
-            meter: LevelMeter::standard(SAMPLE_RATE),
+            meter: LevelMeter::quick(SAMPLE_RATE),
             listener: AmbientMeter::new(),
             settle: 0,
             ambient: Vec::new(),
-            started: None,
+            received: 0,
             noise: pink_band(SAMPLE_RATE, NOISE_LOW_HZ, NOISE_HIGH_HZ, NOISE_DBFS, 1).into(),
             band: BandFilter::new(SAMPLE_RATE, NOISE_LOW_HZ / 2.0, NOISE_HIGH_HZ * 2.0),
         }
@@ -174,7 +178,6 @@ impl LevelState {
         self.settle = LISTEN_SETTLE;
         self.stream =
             Some(audio.start(Source::new(Program::Silence, self.channel), Route::Hardware)?);
-        self.started = Some(Instant::now());
         self.phase = LevelPhase::Listening;
         Ok(())
     }
@@ -218,12 +221,12 @@ impl LevelState {
         self.meter.reset();
         self.band.reset();
         self.spl = None;
+        self.received = 0;
         let program = Program::Loop {
             signal: Arc::clone(&self.noise),
-            fade_in: (FADE_IN_MS * u64::from(SAMPLE_RATE) / 1000) as usize,
+            fade_in: ms_to_samples(FADE_IN_MS),
         };
         self.stream = Some(audio.start(Source::new(program, channel), Route::Hardware)?);
-        self.started = Some(Instant::now());
         self.phase = LevelPhase::Playing;
         Ok(())
     }
@@ -240,9 +243,7 @@ impl LevelState {
     #[must_use]
     pub fn fading_in(&self) -> bool {
         self.phase == LevelPhase::Playing
-            && self
-                .started
-                .is_some_and(|t| t.elapsed() < Duration::from_millis(FADE_IN_MS + METER_SETTLE_MS))
+            && self.received < ms_to_samples(METER_RESTART_MS + METER_SETTLE_MS)
     }
 
     /// The level the amplifier was left at: the louder of the steady readings, dB SPL.
@@ -307,6 +308,13 @@ impl LevelState {
                     ));
                     return;
                 }
+                // Once the fade is over, the meter starts again from the full level.
+                let restart = ms_to_samples(METER_RESTART_MS);
+                let before = self.received;
+                self.received += samples.len();
+                if before < restart && self.received >= restart {
+                    self.meter.reset();
+                }
                 self.meter.push(&self.band.process(&samples));
                 if let Some(db) = self.meter.dbfs() {
                     let spl = scale.spl(db);
@@ -326,6 +334,11 @@ impl LevelState {
     pub fn room_is_noisy(&self) -> bool {
         self.ambient_spl.is_some_and(|a| a > self.target_spl - 25.0)
     }
+}
+
+/// `ms` of audio in samples.
+fn ms_to_samples(ms: u64) -> usize {
+    (ms * u64::from(SAMPLE_RATE) / 1000) as usize
 }
 
 impl Default for LevelState {

@@ -84,14 +84,16 @@ fn simple_lines() -> Vec<Line<'static>> {
            seconds, with fine detail and a waterfall of how the bass decays; bass traps show \
            best there, as notes that stop ringing sooner (keep still while a sweep plays). \
            Fast sweeps: a one-second sweep over and over without pauses, the curve and the \
-           waterfall updated five times a second; a change shows within a second. Live: a \
-           low rumble of noise plays without a break and the curve follows any change within \
-           about half a second, so you can watch it while you carry a trap.",
+           waterfall updated five times a second; a change shows within a second. Fastest \
+           sweeps: a third-of-a-second sweep over and over, the curve updated ten times a \
+           second; it follows any change within about half a second, so you can watch it \
+           while you carry a trap. Its waterfall is only rough (the first 120 ms, coarse in \
+           frequency): the room rings longer than one sweep.",
         ),
         p(
             "A big number beside the text says how much more even than the pinned reading the \
-           latest one is, readable from across the room. The most even reading so far stays \
-           on the chart as a faded green curve: where to put the trap back.",
+           latest one is, readable from across the room. The pinned curve stays on the chart, \
+           behind the latest one.",
         ),
         gap(),
         h("Decay (w)"),
@@ -111,15 +113,20 @@ fn simple_lines() -> Vec<Line<'static>> {
            measurement alone CorrectSound guesses the room's size and where things are, and \
            lists its guesses under your own rooms (g/G go through the list). Measure your room \
            with a tape measure and change the numbers (↑/↓ choose, type metres and Enter, or \
-           ←/→ for 5 cm steps): changing a guess makes it your room. Your rooms are saved in \
-           config.toml and with the session, so a review finds them; x x deletes one.",
+           ←/→ for 5 cm steps): the speakers from the wall behind them and from the nearer side \
+           wall, how far apart they are, and your seat from the speakers. Changing one keeps \
+           the rest together, and m mirrors the setup to the other side wall. Changing a guess \
+           makes it your room. Your rooms are saved in config.toml and with the session, so a \
+           review finds them; x x deletes one.",
         ),
         p(
             "It then names every resonance (\"33 Hz: side to side, 5.24 m\"), shows where each \
            standing wave is loud (that is where bass traps work), says how well its model of \
            the room matches what was measured, and, when it does, whether another seat or \
-           moving the whole setup would make the bass more even. v switches the plan to a map \
-           of how even the bass would be at every seat. Check any suggestion with live \
+           moving the whole setup would make the bass more even. v shows where to sit: every \
+           spot coloured by how even the bass below 80 Hz would be if you sat there, with the \
+           speakers where they are (green even, red boomy or thin). Check any suggestion with \
+           live \
            placement before moving furniture.",
         ),
         gap(),
@@ -280,14 +287,18 @@ fn technical_lines() -> Vec<Line<'static>> {
            Decay below), and the notes that ring longest are compared with the pinned sweep.",
         ),
         p(
-            "Live: periodic pink noise, 15–600 Hz, peaking at the sweep level, one period of \
-           2^14 samples (0.34 s) played in a loop. Every frequency in it is a multiple of the \
+            "Fastest sweeps: a logarithmic sweep, 15–600 Hz, peaking at the sweep level, \
+           filling one period of 2^14 samples (0.34 s) played in a loop. Every frequency in \
+           it is a multiple of the \
            loop rate (2.9 Hz), so once the room has settled any one period of the recording \
            gives |H|² = |Y|²/|X|² exactly at those frequencies, whatever its start: no \
            alignment with playback, and powers rather than phases, so the mic's own USB clock \
            does not matter. Recomputed from the latest period every 4800 recorded samples \
            (0.1 s), averaged half and half with the previous result, shown at 1/12 octave. \
            A change shows in about 0.6 s: one period plus the room's decay plus the average. \
+           The rough waterfall comes from the circular impulse response of the same period: a \
+           120 ms window, slices to 120 ms, ending before the sweep's distortion wraps around \
+           to the end of the loop; a tail longer than the loop adds onto it. \
            The score is computed at 1/24 octave in every mode.",
         ),
         p(

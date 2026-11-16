@@ -199,6 +199,7 @@ fn wizard(options: Options) -> Result<()> {
     let result = (|| -> Result<()> {
         while !app.quit && !signalled.load(Ordering::Relaxed) {
             gfx.refresh_cell_size();
+            gfx.begin_frame();
             terminal.draw(|f| correctsound::ui::draw(f, &app, &mut gfx))?;
             if event::poll(Duration::from_millis(50))?
                 && let Event::Key(key) = event::read()?

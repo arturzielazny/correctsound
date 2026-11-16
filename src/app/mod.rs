@@ -923,6 +923,7 @@ impl App {
             return;
         }
         self.measure.issue = None;
+        self.message = None;
         let mut p = PlacementState::new(Channel::Left, self.measure.sweep_dbfs());
         if let Env::Sim { state, .. } = &self.env {
             let mut st = state.lock().expect("sim state lock poisoned");
@@ -931,7 +932,7 @@ impl App {
         if let Some(audio) = self.audio.as_mut()
             && let Err(e) = p.start(audio.as_mut())
         {
-            p.issue = Some(format!("{e:#}"));
+            p.report(format!("{e:#}"));
         }
         self.placement = Some(p);
     }
@@ -948,25 +949,8 @@ impl App {
             }
             KeyCode::Char(' ') => p.pin(),
             KeyCode::Tab => p.switch_channel(),
-            KeyCode::Char('m') => {
-                p.switch_mode();
-                self.message = Some(
-                    match p.mode {
-                        placement::Mode::Sweeps => {
-                            "Sweeps: a sweep every couple of seconds, fine detail and the decay."
-                        }
-                        placement::Mode::Fast => {
-                            "Fast sweeps: a sweep every second without pauses, updated five times \
-                             a second, with the decay."
-                        }
-                        placement::Mode::Live => {
-                            "Live: bass noise plays continuously; the curve follows within half a \
-                             second."
-                        }
-                    }
-                    .into(),
-                );
-            }
+            // The screen shows the mode; no message that would stay behind.
+            KeyCode::Char('m') => p.switch_mode(),
             KeyCode::Char('s') => {
                 p.paused = !p.paused;
                 if p.paused {
@@ -978,13 +962,10 @@ impl App {
                     return true;
                 };
                 let step = if code == KeyCode::Right { 0.05 } else { -0.05 };
+                // The status line shows the new distance.
                 let mut st = state.lock().expect("sim state lock poisoned");
                 let d = (st.wall_m.unwrap_or(SIM_WALL_START_M) + step).clamp(0.1, 2.0);
                 st.wall_m = Some(d);
-                self.message = Some(format!(
-                    "Simulated: the speakers are now {:.0} cm from the wall behind them.",
-                    d * 100.0
-                ));
             }
             _ => return false,
         }
@@ -992,7 +973,7 @@ impl App {
             && let Some(p) = self.placement.as_mut()
             && let Err(e) = p.start(audio.as_mut())
         {
-            p.issue = Some(format!("{e:#}"));
+            p.report(format!("{e:#}"));
         }
         true
     }
@@ -1010,7 +991,7 @@ impl App {
         if let Some(audio) = self.audio.as_mut()
             && let Err(e) = p.start(audio.as_mut())
         {
-            p.issue = Some(format!("{e:#}"));
+            p.report(format!("{e:#}"));
             p.paused = true;
         }
     }
@@ -1120,6 +1101,19 @@ impl App {
                 }
             }
             KeyCode::Char(c @ ('0'..='9' | '.' | ',')) => r.typing.push(c),
+            // A minus starts a number: the seat left of centre.
+            KeyCode::Char('-') if r.typing.is_empty() => r.typing.push('-'),
+            KeyCode::Char('m') if r.typing.is_empty() => {
+                let new = r.mirror();
+                self.message = Some(if new {
+                    format!(
+                        "Mirrored to the other side wall: your room {}, saved.",
+                        r.yours.len()
+                    )
+                } else {
+                    "Mirrored to the other side wall.".to_owned()
+                });
+            }
             KeyCode::Backspace => {
                 r.typing.pop();
             }

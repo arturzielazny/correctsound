@@ -114,7 +114,16 @@ is that every port adds a module under `src/platform/` and leaves the rest alone
   per-octave check now measures the bass noise after the room has stopped ringing.
 - **Fast sweeps** (placement, `m` cycles the modes): a 1 s sweep looped without pauses and
   deconvolved circularly, curve and waterfall every 0.2 s. A big evenness number for
-  reading across the room, and the most even curve so far kept in faded green.
+  reading across the room.
+- **Fastest sweeps** replace the live noise mode: a 0.34 s bass sweep looped, the curve
+  every 0.1 s (it matches a single sweep within 0.2 dB in the simulator), with a rough
+  waterfall of the first 120 ms (a 120 ms window, ending before the sweep's distortion wraps
+  around). Sweeps have a
+  lower crest factor than noise, so more signal at the same peak level. The most even
+  curve so far (faded green) is gone: it cluttered the chart; the pinned curve is drawn
+  solid and dimmer, behind the latest.
+- **Ultrawide terminals**: charts wider than 256 cells are sent as tiles, because one
+  kitty-protocol image (Unicode placeholders) spans at most 297 columns.
 - **Decay (waterfall) view** (`w`): cumulative spectral decay of the bass, and the notes
   that ring longest, also listed in the curiosities and `report.txt`.
 - **Room screen** (`r`): a rectangular-room modal model (Kuttruff) with the measured decay

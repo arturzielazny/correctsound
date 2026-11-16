@@ -239,19 +239,12 @@ fn full_wizard_on_simulator() {
     );
     eprintln!("fast at 1 m vs sweep at 1 m {same:.2} dB, vs sweep at 0.6 m {other:.2} dB");
     assert!(same < other / 4.0, "{same} vs {other}");
-    // The big number and the best curve so far.
+    // The big number.
     let screen = render(&app);
     assert!(
         screen.contains("Evenness") && screen.contains("█") && screen.contains("Fast sweeps"),
         "{screen}"
     );
-    let best = |a: &App| {
-        a.placement
-            .as_ref()
-            .and_then(|p| p.best[0].clone())
-            .expect("a best reading")
-    };
-    assert!(best(&app).score.evenness_db <= fast.score.evenness_db);
     // Moving the wall while the sweep loops: the curve follows within about a second. Counted
     // in updates (0.2 s of sound each while the app keeps up, fewer when it lags behind the
     // simulator), so a slow test machine does not change the result.
@@ -275,37 +268,35 @@ fn full_wizard_on_simulator() {
     eprintln!("fast sweeps followed the move in {updates} updates");
     // One sweep (five updates) plus the one under way.
     assert!(updates <= 7, "{updates} updates");
-    // Back at 0.6 m, where the pin was: the best so far is the pinned reading or close.
-    tick_until(&mut app, "more fast sweeps", Duration::from_secs(30), |a| {
-        count(a) >= seen + 20
-    });
-    assert!(best(&app).score.evenness_db <= pinned.score.evenness_db + 1e-9);
     for _ in 0..8 {
         press(&mut app, KeyCode::Right);
     }
 
-    // Live mode: continuous noise, a new reading every tenth of a second.
+    // Fastest sweeps: a short sweep looping, a new reading every tenth of a second.
     press(&mut app, KeyCode::Char('m'));
     let seen = count(&app);
-    tick_until(&mut app, "live readings", Duration::from_secs(30), |a| {
+    tick_until(&mut app, "fastest sweeps", Duration::from_secs(30), |a| {
         count(a) >= seen + 5
     });
     let live = app
         .placement
         .as_ref()
         .and_then(|p| p.latest.clone())
-        .expect("live reading");
-    assert_eq!(live.mode, Mode::Live);
-    assert!(live.waterfall.is_none());
-    // The same placement measured the other way looks the same: the live curve matches the
-    // sweep at this wall distance (1 m) much better than the one at the other (0.6 m).
+        .expect("fastest reading");
+    assert_eq!(live.mode, Mode::Fastest);
+    // Its waterfall is only rough: the first 120 ms.
+    let rough = live.waterfall.as_ref().expect("a rough waterfall");
+    assert_eq!(rough.times_ms.last().copied(), Some(120.0));
+    assert!(render(&app).contains("rough"));
+    // The same placement measured the other way looks the same: the fastest curve matches
+    // the sweep at this wall distance (1 m) much better than the one at the other (0.6 m).
     let (same, other) = (
         shape_difference(&live, &now),
         shape_difference(&live, &pinned),
     );
-    eprintln!("live at 1 m vs sweep at 1 m {same:.2} dB, vs sweep at 0.6 m {other:.2} dB");
+    eprintln!("fastest at 1 m vs sweep at 1 m {same:.2} dB, vs sweep at 0.6 m {other:.2} dB");
     assert!(same < other / 2.0, "{same} vs {other}");
-    // Moving the wall while the noise plays: the dip follows within a few updates (0.1 s of
+    // Moving the wall while the sweep loops: the dip follows within a few updates (0.1 s of
     // sound each, while the app keeps up).
     app.tick();
     for _ in 0..8 {
@@ -314,7 +305,7 @@ fn full_wizard_on_simulator() {
     let moved_at = count(&app);
     tick_until(
         &mut app,
-        "the live curve to follow",
+        "the fastest curve to follow",
         Duration::from_secs(10),
         |a| {
             a.placement
@@ -324,13 +315,13 @@ fn full_wizard_on_simulator() {
         },
     );
     let updates = count(&app) - moved_at;
-    eprintln!("live followed the move in {updates} updates");
+    eprintln!("fastest sweeps followed the move in {updates} updates");
     // One period (3.4 updates) and the average settling.
     assert!(updates <= 8, "{updates} updates");
     let seen = count(&app);
     tick_until(
         &mut app,
-        "live after moving",
+        "fastest after moving",
         Duration::from_secs(10),
         |a| count(a) >= seen + 10,
     );
@@ -338,14 +329,14 @@ fn full_wizard_on_simulator() {
         .placement
         .as_ref()
         .and_then(|p| p.latest.clone())
-        .expect("live reading");
+        .expect("fastest reading");
     let (same, other) = (
         shape_difference(&moved, &pinned),
         shape_difference(&moved, &now),
     );
-    eprintln!("live at 0.6 m vs sweep at 0.6 m {same:.2} dB, vs sweep at 1 m {other:.2} dB");
+    eprintln!("fastest at 0.6 m vs sweep at 0.6 m {same:.2} dB, vs sweep at 1 m {other:.2} dB");
     assert!(same < other / 2.0, "{same} vs {other}");
-    assert!(render(&app).contains("Live"));
+    assert!(render(&app).contains("Fastest sweeps"));
     // Back where it was for the measurements that follow.
     for _ in 0..8 {
         press(&mut app, KeyCode::Right);
@@ -365,7 +356,15 @@ fn full_wizard_on_simulator() {
     tick_until(&mut app, "second position", Duration::from_secs(20), |a| {
         a.measure.positions.iter().all(|p| p.len() == 2) && !a.measure.running()
     });
-    assert!(render(&app).contains("2 mic positions"));
+    let screen = render(&app);
+    assert!(
+        screen.contains("2 mic positions") && screen.contains("each one faint"),
+        "{screen}"
+    );
+    // Each position is kept for the chart, behind the average.
+    for r in app.measure.responses.iter().flatten() {
+        assert_eq!(r.positions_display.len(), 2);
+    }
 
     press(&mut app, KeyCode::Enter);
     assert_eq!(app.step, Step::Result);
@@ -453,21 +452,30 @@ fn full_wizard_on_simulator() {
     assert_eq!(app.room.selected, room::Selected::Yours(0));
     assert_eq!(app.room.guesses[0].setup, guessed);
     assert!(render(&app).contains("Your room 1, saved"));
-    // ←/→ move the selected thing by 5 cm: the right speaker's distance from its wall.
-    for _ in 0..5 {
+    // ←/→ move the selected thing by 5 cm: the setup's distance from its side wall.
+    for _ in 0..4 {
         press(&mut app, KeyCode::Down);
     }
-    assert_eq!(app.room.selected_field(), room::Field::RightFromRightWall);
-    let before = room::Field::RightFromRightWall.get(&app.room.setup().expect("set"));
+    assert_eq!(app.room.selected_field(), room::Field::SideWall);
+    let before = app.room.setup().expect("set");
     press(&mut app, KeyCode::Right);
-    let after = room::Field::RightFromRightWall.get(&app.room.setup().expect("set"));
+    let after = app.room.setup().expect("set");
+    let apart = |s: &correctsound::dsp::roommodel::Setup| s.speakers[1].y - s.speakers[0].y;
+    assert!(
+        (apart(&after) - apart(&before)).abs() < 1e-9,
+        "the speakers move together"
+    );
+    let (before, after) = (
+        room::Field::SideWall.get(&before),
+        room::Field::SideWall.get(&after),
+    );
     assert_eq!(
         app.room.yours.len(),
         1,
         "the same room changed, not a new one"
     );
     assert!((after - before - 0.05).abs() < 0.011, "{before} → {after}");
-    // Every standing wave can be shown, and the seat map instead.
+    // Every standing wave can be shown, and where to sit instead.
     let derived = app.room.current().expect("the model's view");
     assert!(!derived.listed.is_empty());
     assert!(derived.agreement_db.iter().all(Option::is_some));
@@ -476,7 +484,7 @@ fn full_wizard_on_simulator() {
     assert_eq!(app.room.view, room::PlanView::Seats);
     let screen = render(&app);
     assert!(
-        screen.contains("seat by seat") && screen.contains("v standing waves"),
+        screen.contains("Where to sit") && screen.contains("v standing waves"),
         "{screen}"
     );
     press(&mut app, KeyCode::Char('['));

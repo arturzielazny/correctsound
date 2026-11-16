@@ -15,6 +15,7 @@ use ratatui::widgets::{Block, Borders};
 use super::graphics::Graphics;
 use super::raster::{Canvas, Pen};
 use super::theme::{Rgb, Theme};
+use crate::audio::Channel;
 
 /// A frequency span for the x axis, Hz.
 pub type HzRange = (f64, f64);
@@ -86,10 +87,10 @@ pub enum Series {
     Boost,
     /// The whole equalizer: filters, preamp and trim.
     Eq,
-    /// A pinned curve to compare against.
+    /// A pinned curve to compare against, drawn behind the others.
     Reference,
-    /// The best curve so far, faded behind the others.
-    Best,
+    /// One mic position of a channel, faint behind the channel's average.
+    Position(Channel),
     /// One time slice of a decay view, 0 (the start) to 5 (late).
     Slice(u8),
 }
@@ -117,7 +118,8 @@ impl Series {
             Self::Boost => Color::Green,
             Self::Eq => Color::White,
             Self::Reference => Color::Gray,
-            Self::Best => Color::Green,
+            Self::Position(Channel::Left) => Color::Yellow,
+            Self::Position(Channel::Right) => Color::LightBlue,
             Self::Slice(k) => [
                 Color::Red,
                 Color::LightRed,
@@ -140,7 +142,8 @@ impl Series {
             Self::Boost => t.green,
             Self::Eq => t.foreground,
             Self::Reference => t.foreground,
-            Self::Best => t.green,
+            Self::Position(Channel::Left) => t.orange,
+            Self::Position(Channel::Right) => t.cyan,
             Self::Slice(k) => time_color(t, f32::from(k) / 5.0),
         }
     }
@@ -157,9 +160,11 @@ impl Series {
             }
             Self::Cut | Self::Boost => Pen::solid(color, 0.6, width * 0.6),
             Self::Eq => Pen::solid(color, 1.0, width * 1.1),
-            Self::Reference => Pen::dashed(color, 0.6, width * 0.8, label_px * 0.5),
-            // Wide and faint: a band that shows where the curve was best.
-            Self::Best => Pen::solid(color, 0.3, width * 2.5),
+            // Solid and as wide as the latest curve, so it reads at a glance, but dimmer
+            // and drawn first, so the latest stays on top.
+            Self::Reference => Pen::solid(color, 0.55, width * 1.3),
+            // Faint and thin: the spread between positions, not lines to read one by one.
+            Self::Position(_) => Pen::solid(color, 0.35, width * 0.7),
             Self::Slice(_) => Pen::solid(color, 0.95, width * 0.9),
         }
     }
@@ -168,7 +173,7 @@ impl Series {
     fn layer(self) -> u8 {
         u8::from(!matches!(
             self,
-            Self::Target | Self::Cut | Self::Boost | Self::Reference | Self::Best
+            Self::Target | Self::Cut | Self::Boost | Self::Reference | Self::Position(_)
         ))
     }
 }

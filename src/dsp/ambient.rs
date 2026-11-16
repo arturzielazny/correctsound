@@ -32,8 +32,9 @@ const BLOCK: usize = SAMPLE_RATE as usize / 2;
 const HOP: usize = BLOCK / 2;
 /// Blocks kept: the last 3 s. The median over them ignores a cough or a passing car.
 const KEEP: usize = 11;
-/// Blocks needed before the levels are trusted (1.5 s).
-const MIN_BLOCKS: usize = 5;
+/// Blocks needed before the levels are trusted (1 s): their median already ignores one
+/// cough, and the suggestion keeps following the room while listening goes on.
+const MIN_BLOCKS: usize = 3;
 
 /// Margin per octave the suggested level aims for, dB. The measurement is rejected below
 /// [`super::sweep::MIN_OCTAVE_SNR_DB`] (20 dB); at 30 dB the background adds at most a few

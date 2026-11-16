@@ -30,18 +30,21 @@ pub enum PlanView {
     Seats,
 }
 
-/// One editable number.
+/// One editable number. They follow how people measure a room: the setup from the wall
+/// behind it and from the nearer side wall, the speakers' spacing, and the seat from the
+/// speakers. Changing one keeps the rest of the setup together: a wider room keeps the
+/// setup in its corner, moving the speakers moves the seat with them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Field {
     Length,
     Width,
     Height,
     SpeakersFromFront,
-    LeftFromLeftWall,
-    RightFromRightWall,
+    SideWall,
+    Apart,
     SpeakerHeight,
-    SeatFromFront,
-    SeatFromLeftWall,
+    SeatFromSpeakers,
+    SeatOffCentre,
     EarHeight,
 }
 
@@ -51,27 +54,28 @@ impl Field {
         Self::Width,
         Self::Height,
         Self::SpeakersFromFront,
-        Self::LeftFromLeftWall,
-        Self::RightFromRightWall,
+        Self::SideWall,
+        Self::Apart,
         Self::SpeakerHeight,
-        Self::SeatFromFront,
-        Self::SeatFromLeftWall,
+        Self::SeatFromSpeakers,
+        Self::SeatOffCentre,
         Self::EarHeight,
     ];
 
-    /// What it is, for the screen.
+    /// What it is in `s`, for the screen (the side wall is the one nearer the speakers).
     #[must_use]
-    pub fn label(self) -> &'static str {
+    pub fn label(self, s: &Setup) -> &'static str {
         match self {
             Self::Length => "Room, front to back",
             Self::Width => "Room, side to side",
             Self::Height => "Room, floor to ceiling",
             Self::SpeakersFromFront => "Speakers' fronts to the wall behind",
-            Self::LeftFromLeftWall => "Left speaker to the left wall",
-            Self::RightFromRightWall => "Right speaker to the right wall",
+            Self::SideWall if on_right(s) => "Right speaker to the right wall",
+            Self::SideWall => "Left speaker to the left wall",
+            Self::Apart => "Speakers apart, centre to centre",
             Self::SpeakerHeight => "Woofers above the floor",
-            Self::SeatFromFront => "Your ears to the wall behind speakers",
-            Self::SeatFromLeftWall => "Your ears to the left wall",
+            Self::SeatFromSpeakers => "Your ears to the speakers' line",
+            Self::SeatOffCentre => "Your ears right of centre (left: -)",
             Self::EarHeight => "Your ears above the floor",
         }
     }
@@ -84,44 +88,99 @@ impl Field {
             Self::Width => s.room.width,
             Self::Height => s.room.height,
             Self::SpeakersFromFront => s.speakers[0].x,
-            Self::LeftFromLeftWall => s.speakers[0].y,
-            Self::RightFromRightWall => s.room.width - s.speakers[1].y,
+            Self::SideWall if on_right(s) => s.room.width - s.speakers[1].y,
+            Self::SideWall => s.speakers[0].y,
+            Self::Apart => s.speakers[1].y - s.speakers[0].y,
             Self::SpeakerHeight => s.speakers[0].z,
-            Self::SeatFromFront => s.seat.x,
-            Self::SeatFromLeftWall => s.seat.y,
+            Self::SeatFromSpeakers => s.seat.x - s.speakers[0].x,
+            Self::SeatOffCentre => s.seat.y - middle(s),
             Self::EarHeight => s.seat.z,
         }
     }
 
-    /// Sets its value in `s`, keeping the rest where it is (the right speaker keeps its
-    /// distance from the right wall when the room's width changes).
+    /// Sets its value in `s`, keeping the rest of the setup together.
     pub fn set(self, s: &mut Setup, v: f64) {
-        let v = v.max(0.0);
+        let v = if self == Self::SeatOffCentre {
+            v
+        } else {
+            v.max(0.0)
+        };
         match self {
             Self::Length => s.room.length = v,
             Self::Width => {
-                let from_right = s.room.width - s.speakers[1].y;
+                // A setup in the right half keeps its distance from the right wall.
+                if on_right(s) {
+                    shift_sideways(s, v - s.room.width);
+                }
                 s.room.width = v;
-                s.speakers[1].y = v - from_right;
             }
             Self::Height => s.room.height = v,
             Self::SpeakersFromFront => {
-                s.speakers[0].x = v;
-                s.speakers[1].x = v;
+                let by = v - s.speakers[0].x;
+                for p in &mut s.speakers {
+                    p.x = v;
+                }
+                s.seat.x += by;
             }
-            Self::LeftFromLeftWall => s.speakers[0].y = v,
-            Self::RightFromRightWall => s.speakers[1].y = s.room.width - v,
+            Self::SideWall => {
+                let by = if on_right(s) {
+                    s.room.width - v - s.speakers[1].y
+                } else {
+                    v - s.speakers[0].y
+                };
+                shift_sideways(s, by);
+            }
+            Self::Apart => {
+                // The speaker nearer its wall stays; the seat stays centred between them.
+                let off_centre = s.seat.y - middle(s);
+                if on_right(s) {
+                    s.speakers[0].y = s.speakers[1].y - v;
+                } else {
+                    s.speakers[1].y = s.speakers[0].y + v;
+                }
+                s.seat.y = middle(s) + off_centre;
+            }
             Self::SpeakerHeight => {
-                s.speakers[0].z = v;
-                s.speakers[1].z = v;
+                for p in &mut s.speakers {
+                    p.z = v;
+                }
             }
-            Self::SeatFromFront => s.seat.x = v,
-            Self::SeatFromLeftWall => s.seat.y = v,
+            Self::SeatFromSpeakers => s.seat.x = s.speakers[0].x + v,
+            Self::SeatOffCentre => s.seat.y = middle(s) + v,
             Self::EarHeight => s.seat.z = v,
         }
         if s.room.is_valid() {
             s.keep_inside();
         }
+    }
+}
+
+/// Halfway between the speakers, m from the left wall.
+fn middle(s: &Setup) -> f64 {
+    (s.speakers[0].y + s.speakers[1].y) / 2.0
+}
+
+/// True when the speakers stand in the right half of the room.
+fn on_right(s: &Setup) -> bool {
+    middle(s) > s.room.width / 2.0
+}
+
+/// Moves the speakers and the seat `by` m to the right.
+fn shift_sideways(s: &mut Setup, by: f64) {
+    for p in s.speakers.iter_mut().chain(std::iter::once(&mut s.seat)) {
+        p.y += by;
+    }
+}
+
+/// `s` mirrored left to right: the same setup against the other side wall.
+#[must_use]
+pub fn mirrored(s: &Setup) -> Setup {
+    let w = s.room.width;
+    let flip = |p: Point| Point { y: w - p.y, ..p };
+    Setup {
+        room: s.room,
+        speakers: [flip(s.speakers[1]), flip(s.speakers[0])],
+        seat: flip(s.seat),
     }
 }
 
@@ -364,6 +423,15 @@ impl RoomState {
         self.editable().is_some_and(|(s, new)| {
             let v = field.get(s);
             field.set(s, ((v + delta) * 100.0).round() / 100.0);
+            new
+        })
+    }
+
+    /// Mirrors the setup to the other side of the room; true when that made a new room of
+    /// the user's from a guess.
+    pub fn mirror(&mut self) -> bool {
+        self.editable().is_some_and(|(s, new)| {
+            *s = mirrored(s);
             new
         })
     }
@@ -663,19 +731,75 @@ mod tests {
 
     #[test]
     fn fields_read_and_write_what_they_say() {
+        // The user's room: in the right corner, the right speaker 0.7 m from its wall,
+        // 1.13 m apart, 0.75 m from the wall behind, an equilateral triangle.
+        // A centred setup counts as the left half: 0.7 m goes to the left wall, and m
+        // mirrors it into the right corner.
         let mut s = setup();
-        Field::RightFromRightWall.set(&mut s, 0.7);
-        assert!((s.speakers[1].y - 4.54).abs() < 1e-9);
-        assert!((Field::RightFromRightWall.get(&s) - 0.7).abs() < 1e-9);
-        // A narrower room keeps the right speaker 0.7 m from its wall.
-        Field::Width.set(&mut s, 5.0);
-        assert!((Field::RightFromRightWall.get(&s) - 0.7).abs() < 1e-9);
+        Field::SideWall.set(&mut s, 0.7);
+        assert!(!on_right(&s));
+        s = mirrored(&s);
+        Field::Apart.set(&mut s, 1.13);
         Field::SpeakersFromFront.set(&mut s, 0.75);
-        assert_eq!(s.speakers[0].x, 0.75);
-        assert_eq!(s.speakers[1].x, 0.75);
+        Field::SeatFromSpeakers.set(&mut s, 0.98);
+        Field::SeatOffCentre.set(&mut s, 0.0);
+        assert!(on_right(&s), "{s:?}");
+        assert_eq!(Field::SideWall.label(&s), "Right speaker to the right wall");
+        assert!((s.speakers[1].y - 4.54).abs() < 1e-9);
+        assert!((s.speakers[0].y - 3.41).abs() < 1e-9);
+        assert!((s.seat.y - 3.975).abs() < 1e-9);
+        assert!((s.seat.x - 1.73).abs() < 1e-9);
+        for (f, v) in [
+            (Field::SideWall, 0.7),
+            (Field::Apart, 1.13),
+            (Field::SeatFromSpeakers, 0.98),
+            (Field::SeatOffCentre, 0.0),
+        ] {
+            assert!((f.get(&s) - v).abs() < 1e-9, "{f:?}: {}", f.get(&s));
+        }
+        // A guess 3 m wide corrected to 5.24 m: the setup stays in its corner, together.
+        let mut narrow = s;
+        narrow.room.width = 3.0;
+        shift_sideways(&mut narrow, 3.0 - 5.24);
+        Field::Width.set(&mut narrow, 5.24);
+        for (a, b) in narrow
+            .speakers
+            .iter()
+            .chain([&narrow.seat])
+            .zip(s.speakers.iter().chain([&s.seat]))
+        {
+            assert!((a.y - b.y).abs() < 1e-9, "{narrow:?}");
+        }
+        // Moving the speakers forward takes the seat along.
+        Field::SpeakersFromFront.set(&mut s, 0.85);
+        assert!((s.seat.x - 1.83).abs() < 1e-9);
         // Nothing ends up outside the room.
-        Field::SeatFromFront.set(&mut s, 9.0);
+        Field::SeatFromSpeakers.set(&mut s, 9.0);
         assert!(s.seat.x < s.room.length);
+    }
+
+    #[test]
+    fn mirroring_puts_the_setup_against_the_other_wall() {
+        let mut s = setup();
+        Field::SideWall.set(&mut s, 0.7);
+        let m = mirrored(&s);
+        assert!(on_right(&m));
+        assert_eq!(Field::SideWall.label(&m), "Right speaker to the right wall");
+        assert!((Field::SideWall.get(&m) - 0.7).abs() < 1e-9);
+        assert!((Field::Apart.get(&m) - Field::Apart.get(&s)).abs() < 1e-9);
+        assert!(
+            m.speakers[0].y < m.speakers[1].y,
+            "the left speaker stays the left one"
+        );
+        let back = mirrored(&m);
+        for (a, b) in back
+            .speakers
+            .iter()
+            .chain([&back.seat])
+            .zip(s.speakers.iter().chain([&s.seat]))
+        {
+            assert!((a.y - b.y).abs() < 1e-9 && a.x == b.x, "{back:?}");
+        }
     }
 
     fn guess_of(setup: Setup) -> Guess {

@@ -172,7 +172,7 @@ fn fields(frame: &mut Frame<'_>, area: Rect, app: &App) {
             } else {
                 format!("{:.2} m", f.get(&setup))
             };
-            let label = f.label();
+            let label = f.label(&setup);
             let width = usize::from(SIDE_WIDTH).saturating_sub(4 + label.chars().count() + 1);
             let text = format!(
                 "{} {label}{value:>width$}",
@@ -469,7 +469,7 @@ fn plan(
                 });
             format!("{:.1} Hz, {}{rings}", m.hz, short(&m, &d.setup.room))
         }
-        _ => format!("Even bass below {JUDGED_TO_HZ:.0} Hz, seat by seat"),
+        _ => format!("Where to sit: bass below {JUDGED_TO_HZ:.0} Hz"),
     };
     let block = panel(&title);
     let inner = block.inner(area);
@@ -758,8 +758,8 @@ fn draw_plan(
             "green along the walls: where traps work",
         ],
         PlanView::Seats => [
-            "green: even bass   red: uneven",
-            "ring: the most even seat within 60 cm",
+            "if you sat here: green even bass, red boomy or thin",
+            "speakers where they are · ring: best seat within 60 cm",
         ],
     };
     let (lx, ly) = at(room.length, room.width / 2.0);
