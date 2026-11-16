@@ -30,9 +30,15 @@ pub struct SessionInfo {
     /// before it was worked out from the room: 75).
     #[serde(default)]
     pub level_spl: Option<f64>,
+    /// The level the room's background called for, dB SPL (`level_spl` may be louder).
+    #[serde(default)]
+    pub needed_spl: Option<f64>,
     /// The room's background noise per octave ([`crate::dsp::ambient::OCTAVES`]), dB SPL.
     #[serde(default)]
     pub room_noise_spl: Option<Vec<f64>>,
+    /// The room and where the speakers and the seat were, when entered.
+    #[serde(default)]
+    pub room: Option<crate::dsp::roommodel::Setup>,
 }
 
 /// A session directory.

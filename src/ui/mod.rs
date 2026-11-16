@@ -5,6 +5,7 @@ pub mod graphics;
 pub mod info;
 pub mod plot;
 pub mod raster;
+pub mod room;
 pub mod theme;
 
 use ratatui::Frame;
@@ -13,7 +14,7 @@ use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Gauge, List, ListItem, ListState, Paragraph, Wrap};
 
-use crate::app::level::{ABORT_SPL, TOLERANCE};
+use crate::app::level::{ABORT_SPL, COMFORT_MAX_SPL, Reading, TOLERANCE};
 use crate::app::{App, CalStatus, LevelPhase, Overlay, Step, VerifyResult};
 use crate::audio::Channel;
 use crate::cal::Orientation;
@@ -59,6 +60,11 @@ fn draw_overlay(
         Overlay::Decay => {
             frame.render_widget(ratatui::widgets::Clear, area);
             decay(frame, area, app, gfx);
+            return;
+        }
+        Overlay::Room => {
+            frame.render_widget(ratatui::widgets::Clear, area);
+            room::draw(frame, area, app, gfx);
             return;
         }
         Overlay::Info { technical } => (
@@ -144,13 +150,40 @@ fn draw_header(frame: &mut Frame<'_>, area: Rect, app: &App) {
     );
 }
 
+/// The room screen's keys, as they apply now.
+fn room_hints(app: &App) -> String {
+    let r = &app.room;
+    if !r.typing.is_empty() {
+        return "Enter set   Backspace   Esc cancel".to_owned();
+    }
+    let mut keys = vec!["↑/↓ number", "←/→ ±5 cm", "or type metres"];
+    keys.push("g/G other rooms");
+    match r.view {
+        crate::app::room::PlanView::Mode => {
+            keys.push("[ ] standing wave");
+            keys.push("v seat map");
+        }
+        crate::app::room::PlanView::Seats => keys.push("v standing waves"),
+    }
+    keys.push("Tab speaker");
+    if !r.showing_guess() {
+        keys.push("x delete");
+    }
+    keys.push("Esc close");
+    keys.join("   ")
+}
+
 fn hints(app: &App) -> String {
+    if app.overlay == Some(Overlay::Room) {
+        return room_hints(app);
+    }
     if let Some(overlay) = app.overlay {
         return match overlay {
             Overlay::Info { technical: false } => "↑/↓ scroll   m technical details   Esc close",
             Overlay::Info { technical: true } => "↑/↓ scroll   m plain version   Esc close",
             Overlay::Curiosities => "↑/↓ scroll   i how it works   Esc close",
             Overlay::Decay => "Tab channel   i how it works   Esc close",
+            Overlay::Room => "",
         }
         .to_owned();
     }
@@ -168,6 +201,9 @@ fn hints(app: &App) -> String {
     }
     if app.measure.positions.iter().any(|p| !p.is_empty()) && app.step >= Step::Measure {
         text.push_str("   w decay");
+        if app.measure.responses.iter().all(Option::is_some) {
+            text.push_str("   r room");
+        }
     }
     text.push_str("   i info");
     text
@@ -246,7 +282,6 @@ fn bad(text: &str) -> Span<'static> {
 // ----- 1 -----
 
 fn preflight(frame: &mut Frame<'_>, area: Rect, app: &App) {
-    let [top, bottom] = Layout::vertical([Constraint::Length(7), Constraint::Min(4)]).areas(area);
     let mut lines: Vec<Line<'_>> = Vec::new();
     for t in &app.missing_tools {
         lines.push(Line::from(bad(&format!("missing {t}"))));
@@ -280,6 +315,15 @@ fn preflight(frame: &mut Frame<'_>, area: Rect, app: &App) {
             ))));
         }
     }
+    if let Some(w) = app.output_warning() {
+        lines.push(Line::from(bad(&w)));
+    }
+    // Room for every line, and for the longer ones to wrap once.
+    let height = u16::try_from(lines.len() * 2 + 2)
+        .unwrap_or(u16::MAX)
+        .clamp(7, 12);
+    let [top, bottom] =
+        Layout::vertical([Constraint::Length(height), Constraint::Min(4)]).areas(area);
     frame.render_widget(
         Paragraph::new(lines)
             .block(panel("Devices"))
@@ -299,6 +343,9 @@ fn preflight(frame: &mut Frame<'_>, area: Rect, app: &App) {
                             Some(h) => label.push_str(&format!("  ({} output)", h.name)),
                             None => label.push_str("  (default)"),
                         }
+                    }
+                    if app.last_measured_sink.as_deref() == Some(s.name.as_str()) {
+                        label.push_str("  (last measurement)");
                     }
                     ListItem::new(label)
                 })
@@ -421,7 +468,7 @@ fn level(frame: &mut Frame<'_>, area: Rect, app: &App) {
     }
     let target = l.target_spl;
     let [info, meter, details] = Layout::vertical([
-        Constraint::Length(5),
+        Constraint::Length(6),
         Constraint::Length(7),
         Constraint::Min(4),
     ])
@@ -429,7 +476,8 @@ fn level(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let instructions = vec![
         Line::from(format!(
             "Pink noise (500–2000 Hz) plays from one speaker. Turn your amplifier until the meter \
-             reads {target:.0} dB: the level your room's background noise calls for."
+             reads {target:.0} dB: the level your room's background noise calls for. Louder is \
+             fine up to {COMFORT_MAX_SPL:.0} dB."
         )),
         Line::from(
             "Put the mic where your head is when listening, at ear height, pointing as chosen in step 2.",
@@ -453,23 +501,24 @@ fn level(frame: &mut Frame<'_>, area: Rect, app: &App) {
         LevelPhase::Idle => "Idle".to_owned(),
     };
     let spl = l.spl.filter(|_| l.phase == LevelPhase::Playing);
+    // The scale runs from 20 dB below the target to the comfortable maximum (at least 10
+    // dB above the target).
+    let scale_lo = target - 20.0;
+    let scale_hi = (target + 10.0).max(COMFORT_MAX_SPL);
     let (ratio, color, label) = match spl {
         Some(s) => {
-            let lo = target - 20.0;
-            let ratio = ((s - lo) / 30.0).clamp(0.0, 1.0);
-            let color = if (s - target).abs() <= TOLERANCE {
-                Color::Green
-            } else if s > target {
-                Color::LightRed
-            } else {
-                Color::Yellow
-            };
-            let hint = if (s - target).abs() <= TOLERANCE {
-                "  ✔ good".to_owned()
-            } else if s > target {
-                format!("  turn down {:.1} dB", s - target)
-            } else {
-                format!("  turn up {:.1} dB", target - s)
+            let ratio = ((s - scale_lo) / (scale_hi - scale_lo)).clamp(0.0, 1.0);
+            let (color, hint) = match Reading::of(s, target) {
+                Reading::TooQuiet => (Color::Yellow, format!("  turn up {:.1} dB", target - s)),
+                Reading::Right => (Color::Green, "  ✔ good".to_owned()),
+                Reading::LouderThanNeeded => (
+                    Color::Green,
+                    format!("  ✔ fine, {:.0} dB more than needed", s - target),
+                ),
+                Reading::TooLoud => (
+                    Color::Yellow,
+                    format!("  loud: turn down {:.1} dB", s - COMFORT_MAX_SPL),
+                ),
             };
             (ratio, color, format!("{s:.1} dB SPL{hint}"))
         }
@@ -494,14 +543,15 @@ fn level(frame: &mut Frame<'_>, area: Rect, app: &App) {
             .label(Span::styled(label, Style::default().bold())),
         gauge,
     );
-    // Scale under the gauge: 20 dB below the target to 10 above, with the target marked.
+    // Scale under the gauge: the target marked, and the fine range from just below it to
+    // the comfortable maximum bracketed.
     let width = scale.width as usize;
     let mut marks = vec![' '; width];
-    let pos = |db: f64| (((db - (target - 20.0)) / 30.0) * width as f64).round() as usize;
+    let pos = |db: f64| (((db - scale_lo) / (scale_hi - scale_lo)) * width as f64).round() as usize;
     for (db, ch) in [
         (target - TOLERANCE, '['),
         (target, '▲'),
-        (target + TOLERANCE, ']'),
+        (COMFORT_MAX_SPL.max(target + TOLERANCE), ']'),
     ] {
         if let Some(m) = marks.get_mut(pos(db).min(width.saturating_sub(1))) {
             *m = ch;
@@ -513,6 +563,17 @@ fn level(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let mut lines = Vec::new();
     if let LevelPhase::Stopped(reason) = &l.phase {
         lines.push(Line::from(bad(reason)));
+    }
+    match spl.map(|s| Reading::of(s, target)) {
+        Some(Reading::LouderThanNeeded) => lines.push(Line::from(ok(&format!(
+            "Louder than this room needs ({target:.0} dB), which is fine: the sweeps only gain \
+             margin over the background. Turn down if it is uncomfortable."
+        )))),
+        Some(Reading::TooLoud) => lines.push(Line::from(warn(&format!(
+            "Louder than {COMFORT_MAX_SPL:.0} dB: tiring over a whole measurement, and small \
+             speakers start to distort in the bass. {target:.0} dB is enough here."
+        )))),
+        _ => {}
     }
     if let Some(n) = &l.room_noise {
         let groups: Vec<String> = NOISE_GROUPS
@@ -697,6 +758,9 @@ fn listening(frame: &mut Frame<'_>, area: Rect, app: &App) {
         noise,
     );
 
+    // The big number is drawn without wrapping: trimming would strip the spaces that place
+    // each row of a digit, turning a 7 into a T.
+    let mut big = Vec::new();
     let mut lines = Vec::new();
     if let Some(s) = &l.suggestion {
         let color = level_verdict(s.level_spl).1;
@@ -705,15 +769,15 @@ fn listening(frame: &mut Frame<'_>, area: Rect, app: &App) {
         } else {
             color
         };
-        lines.extend(bignum::lines(
+        big.extend(bignum::lines(
             &format!("{:.0}", s.level_spl),
             Style::default().fg(color),
         ));
-        lines.push(Line::from(Span::styled(
+        big.push(Line::from(Span::styled(
             "dB SPL",
             Style::default().fg(color),
         )));
-        lines.push(Line::from(""));
+        big.push(Line::from(""));
         let octave = if s.limited_by_hz < 1000.0 {
             format!("{:.0} Hz", s.limited_by_hz)
         } else {
@@ -740,14 +804,22 @@ fn listening(frame: &mut Frame<'_>, area: Rect, app: &App) {
             Style::default().bold(),
         )));
     }
-    let pad = usize::from(suggestion.height.saturating_sub(2)).saturating_sub(lines.len()) / 2;
-    lines.splice(0..0, std::iter::repeat_n(Line::from(""), pad));
+    let block = panel("Measure at");
+    let inner = block.inner(suggestion);
+    frame.render_widget(block, suggestion);
+    let pad = usize::from(inner.height).saturating_sub(big.len() + lines.len()) / 2;
+    let [_, big_area, text_area] = Layout::vertical([
+        Constraint::Length(u16::try_from(pad).unwrap_or(0)),
+        Constraint::Length(u16::try_from(big.len()).unwrap_or(0)),
+        Constraint::Min(0),
+    ])
+    .areas(inner);
+    frame.render_widget(Paragraph::new(big).alignment(Alignment::Center), big_area);
     frame.render_widget(
         Paragraph::new(lines)
             .alignment(Alignment::Center)
-            .wrap(Wrap { trim: true })
-            .block(panel("Measure at")),
-        suggestion,
+            .wrap(Wrap { trim: true }),
+        text_area,
     );
 }
 

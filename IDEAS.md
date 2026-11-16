@@ -88,6 +88,15 @@ is that every port adds a module under `src/platform/` and leaves the rest alone
 4. **Other Linux audio stacks.** PulseAudio-only or JACK systems could get their own
    `System` beside the PipeWire one, picked at run time by what is installed.
 
+## Next for the room screen
+
+- Left/right phase at each mode (both speakers in the same half of a standing wave or not)
+  as a second clue to where the speakers are, independent of the mic position.
+- Fit the dimensions themselves (not only candidates from the resonances) and the speakers'
+  acoustic centres, which sit a little in front of where a tape measure ends.
+- Fold the room model into the EQ: the 0.5 s analysis window understates a mode that rings
+  1.7 s by 2–3 dB (measured on the simulator), which the model can correct.
+
 ## Done
 
 - **Platform layer** (`src/platform/`): the first step towards other operating systems,
@@ -108,6 +117,12 @@ is that every port adds a module under `src/platform/` and leaves the rest alone
   reading across the room, and the most even curve so far kept in faded green.
 - **Decay (waterfall) view** (`w`): cumulative spectral decay of the bass, and the notes
   that ring longest, also listed in the curiosities and `report.txt`.
+- **Room screen** (`r`): a rectangular-room modal model (Kuttruff) with the measured decay
+  times, compared with the measurement below 60 Hz (2–3 dB RMS on a real room with the true
+  layout, 7–8 with a typical one). It guesses the room and the layout from the measurement
+  (floor plan within 2 % on three real sessions), names the resonances, draws the plan with
+  each standing wave and where traps work, a seat map, and seat or setup moves predicted to
+  help, only when the model matches.
 - **Room modes' true decay**: peaks from 20 to 150 Hz measured past the waterfall's
   400 ms, by energy decay (demodulated, steep backwards low-pass, Schroeder) and by peak
   width, merged over mic positions. On a real room both gave 1.7 s for a 33 Hz mode.

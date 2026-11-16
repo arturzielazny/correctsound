@@ -8,6 +8,7 @@ pub mod modes;
 pub mod noise;
 pub mod periodic;
 pub mod room;
+pub mod roommodel;
 pub mod spectrum;
 pub mod sweep;
 

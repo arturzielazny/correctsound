@@ -3,7 +3,7 @@
 use std::time::{Duration, Instant};
 
 use correctsound::app::placement::{Mode, Reading};
-use correctsound::app::{App, LevelPhase, Options, Step};
+use correctsound::app::{App, LevelPhase, Options, Overlay, Step, room};
 use correctsound::eq::fit::AutoMethod;
 use correctsound::ui::graphics::Graphics;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -106,6 +106,35 @@ fn full_wizard_on_simulator() {
         screen.contains("Keep quiet") && screen.contains("Bass") && screen.contains("dB SPL"),
         "{screen}"
     );
+    // Every row of the big number starts in the same column (wrapping once trimmed the
+    // spaces off some rows, so a 7 looked like a T). Shown as 71, whose rows start with gaps.
+    if let Some(s) = app.level.suggestion.as_mut() {
+        s.level_spl = 71.0;
+    }
+    let screen = render(&app);
+    app.level.suggestion = Some(suggestion);
+    let big: Vec<String> = correctsound::ui::bignum::lines("71", ratatui::style::Style::default())
+        .iter()
+        .map(|l| l.spans[0].content.to_string())
+        .collect();
+    let rows: Vec<Vec<char>> = screen.lines().map(|l| l.chars().collect()).collect();
+    let drawn_at = |row: &[char], text: &str| {
+        let text: Vec<char> = text.chars().collect();
+        (0..row.len().saturating_sub(text.len())).find(|&c| row[c..c + text.len()] == text[..])
+    };
+    let (top, col) = rows
+        .iter()
+        .enumerate()
+        .find_map(|(i, r)| drawn_at(r, &big[0]).map(|c| (i, c)))
+        .unwrap_or_else(|| panic!("big number on screen\n{screen}"));
+    for (k, text) in big.iter().enumerate() {
+        let row = &rows[top + k];
+        let here: String = row[col..col + text.chars().count()].iter().collect();
+        assert_eq!(
+            &here, text,
+            "row {k} of the big number is shifted\n{screen}"
+        );
+    }
     press(&mut app, KeyCode::Enter);
     assert!((app.level.target_spl - suggestion.level_spl).abs() < 3.0);
     tick_until(&mut app, "noise", Duration::from_secs(10), |a| {
@@ -389,6 +418,76 @@ fn full_wizard_on_simulator() {
         "{:?}",
         app.curiosities
     );
+
+    // The room screen: guessed from the measurement, then corrected with a tape measure.
+    press(&mut app, KeyCode::Char('r'));
+    assert_eq!(app.overlay, Some(Overlay::Room));
+    assert_eq!(app.room.selected, room::Selected::Guess(0));
+    let guessed = app
+        .room
+        .setup()
+        .expect("a room guessed from the measurement");
+    assert!(guessed.room.is_valid(), "{guessed:?}");
+    assert!(app.room.guesses.len() > 1);
+    let screen = render(&app);
+    assert!(
+        screen.contains("Guess 1: change a number")
+            && screen.contains("Rooms")
+            && screen.contains("Standing waves")
+            && screen.contains("What it means"),
+        "{screen}"
+    );
+    // g and G go through the list.
+    press(&mut app, KeyCode::Char('g'));
+    assert_eq!(app.room.selected, room::Selected::Guess(1));
+    press(&mut app, KeyCode::Char('G'));
+    assert_eq!(app.room.selected, room::Selected::Guess(0));
+    // The first field is the room's length: typed in metres.
+    for c in "5,64".chars() {
+        press(&mut app, KeyCode::Char(c));
+    }
+    press(&mut app, KeyCode::Enter);
+    // Changing a guess makes it a room of your own; the guess stays on the list.
+    let entered = app.room.setup().expect("set");
+    assert_eq!(entered.room.length, 5.64);
+    assert_eq!(app.room.selected, room::Selected::Yours(0));
+    assert_eq!(app.room.guesses[0].setup, guessed);
+    assert!(render(&app).contains("Your room 1, saved"));
+    // ←/→ move the selected thing by 5 cm: the right speaker's distance from its wall.
+    for _ in 0..5 {
+        press(&mut app, KeyCode::Down);
+    }
+    assert_eq!(app.room.selected_field(), room::Field::RightFromRightWall);
+    let before = room::Field::RightFromRightWall.get(&app.room.setup().expect("set"));
+    press(&mut app, KeyCode::Right);
+    let after = room::Field::RightFromRightWall.get(&app.room.setup().expect("set"));
+    assert_eq!(
+        app.room.yours.len(),
+        1,
+        "the same room changed, not a new one"
+    );
+    assert!((after - before - 0.05).abs() < 0.011, "{before} → {after}");
+    // Every standing wave can be shown, and the seat map instead.
+    let derived = app.room.current().expect("the model's view");
+    assert!(!derived.listed.is_empty());
+    assert!(derived.agreement_db.iter().all(Option::is_some));
+    press(&mut app, KeyCode::Char(']'));
+    press(&mut app, KeyCode::Char('v'));
+    assert_eq!(app.room.view, room::PlanView::Seats);
+    let screen = render(&app);
+    assert!(
+        screen.contains("seat by seat") && screen.contains("v standing waves"),
+        "{screen}"
+    );
+    press(&mut app, KeyCode::Char('['));
+    assert_eq!(app.room.view, room::PlanView::Mode);
+    // Your rooms can be deleted, with a second press.
+    press(&mut app, KeyCode::Char('x'));
+    assert_eq!(app.room.yours.len(), 1);
+    press(&mut app, KeyCode::Char('x'));
+    assert!(app.room.yours.is_empty());
+    press(&mut app, KeyCode::Esc);
+    assert!(app.overlay.is_none());
 
     // Back and forth keeps the measurements.
     press(&mut app, KeyCode::Esc);

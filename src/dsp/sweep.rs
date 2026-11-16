@@ -178,6 +178,9 @@ pub struct SweepAnalysis {
     pub waterfall: super::decay::Waterfall,
     /// The room's lowest resonances and how long each rings (informational).
     pub modes: Vec<super::modes::Mode>,
+    /// The bass at high resolution, complex, for comparing speakers and fitting a model of
+    /// the room (none for a recording too short).
+    pub bass: Option<super::modes::BassSpectrum>,
 }
 
 /// Octave bands whose signal-to-noise ratio gates a measurement.
@@ -275,6 +278,7 @@ impl SweepAnalysis {
         }
 
         let delay = if peak < recording.len() { peak } else { 0 };
+        let (modes, bass) = super::modes::analyse(&ir, peak, rate);
         Ok(Self {
             power,
             bin_hz,
@@ -285,7 +289,8 @@ impl SweepAnalysis {
             reflection: super::room::early_reflection(&ir, peak, rate),
             decay: super::room::decay_times(&ir, peak, rate),
             waterfall: super::decay::Waterfall::new(&ir, peak, rate),
-            modes: super::modes::find(&ir, peak, rate),
+            modes,
+            bass,
         })
     }
 }

@@ -5,6 +5,7 @@
 pub mod level;
 pub mod measure;
 pub mod placement;
+pub mod room;
 
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
@@ -56,6 +57,8 @@ pub enum Overlay {
     Curiosities,
     /// How the bass fades after the sound stops (the waterfall), for `view_channel`.
     Decay,
+    /// The room seen from above: its standing waves, the speakers and the seat.
+    Room,
 }
 
 /// Wizard steps, in order.
@@ -165,10 +168,14 @@ pub struct App {
     pub overlay_scroll: u16,
     /// Findings about the room and speakers, refreshed with the design.
     pub curiosities: Vec<crate::insights::Section>,
+    /// The room screen.
+    pub room: room::RoomState,
     pub missing_tools: Vec<String>,
 
     pub devices: Option<Devices>,
     pub sink_index: usize,
+    /// The output the newest measurement (real or simulated, like this run) was made on.
+    pub last_measured_sink: Option<String>,
     last_poll: Option<Instant>,
 
     pub serial_input: String,
@@ -239,6 +246,11 @@ impl App {
             .map(ToString::to_string)
             .unwrap_or_default();
         let orientation = config.orientation;
+        let simulated = matches!(env, Env::Sim { .. });
+        let last_measured_sink = Session::list()
+            .into_iter()
+            .find(|(_, info)| info.simulated == simulated)
+            .map(|(_, info)| info.sink);
         let mut app = Self {
             step: Step::Preflight,
             quit: false,
@@ -251,9 +263,11 @@ impl App {
             overlay: None,
             overlay_scroll: 0,
             curiosities: Vec::new(),
+            room: room::RoomState::default(),
             missing_tools,
             devices: None,
             sink_index: 0,
+            last_measured_sink,
             last_poll: None,
             serial_input,
             orientation,
@@ -278,6 +292,12 @@ impl App {
             app.serial_input = "7000000".into();
         }
         app.poll_devices();
+        if let Some(old) = app.config.room.take()
+            && !app.config.rooms.contains(&old)
+        {
+            app.config.rooms.insert(0, old);
+        }
+        app.room.load(app.config.rooms.clone(), None);
         if let Some(dir) = app.options.review.clone()
             && let Err(e) = app.open_session(&dir)
         {
@@ -333,9 +353,11 @@ impl App {
         self.cal_path.clone_from(&info.calibration_file);
         self.cal = Some(cal);
         self.level.ambient_spl = info.ambient_spl;
-        if let Some(l) = info.level_spl {
+        if let Some(l) = info.needed_spl.or(info.level_spl) {
             self.level.target_spl = l;
         }
+        self.level.reviewed_set_spl = info.level_spl;
+        self.room.load(self.room.yours.clone(), info.room);
         // The output it was measured on, for applying.
         self.options.sink = Some(info.sink.clone());
         self.poll_devices();
@@ -357,6 +379,16 @@ impl App {
     #[must_use]
     pub fn sink(&self) -> Option<&Device> {
         self.devices.as_ref()?.sinks.get(self.sink_index)
+    }
+
+    /// A warning when the selected output is not the one the last measurement used.
+    #[must_use]
+    pub fn output_warning(&self) -> Option<String> {
+        output_warning(
+            &self.devices.as_ref()?.sinks,
+            self.sink()?,
+            self.last_measured_sink.as_deref()?,
+        )
     }
 
     /// The mic node.
@@ -487,6 +519,16 @@ impl App {
                 }
                 return;
             }
+            KeyCode::Char('r') if self.step >= Step::Measure => {
+                if self.measure.responses.iter().all(Option::is_some) {
+                    self.refresh_room();
+                    self.open_overlay(Overlay::Room);
+                } else {
+                    self.message =
+                        Some("The room screen appears once both speakers are measured.".into());
+                }
+                return;
+            }
             KeyCode::Char('q') if !typing => {
                 self.quit = true;
                 return;
@@ -524,6 +566,10 @@ impl App {
     /// Keys while an overlay is shown: scrolling, `m` for the technical version, and the
     /// overlay's own key, Esc or q to close it.
     fn key_overlay(&mut self, code: KeyCode) {
+        if self.overlay == Some(Overlay::Room) {
+            self.key_room(code);
+            return;
+        }
         match (code, self.overlay) {
             (KeyCode::Char('m'), Some(Overlay::Info { technical })) => {
                 self.open_overlay(Overlay::Info {
@@ -597,20 +643,16 @@ impl App {
                         }
                     };
                 }
-                let wanted = self
-                    .options
-                    .sink
-                    .clone()
-                    .or_else(|| self.config.sink.clone().filter(|_| self.devices.is_none()))
-                    .or_else(|| d.preferred_sink.clone());
-                if let Some(w) = wanted
-                    && let Some(i) = d.sinks.iter().position(|s| s.name == w)
-                {
-                    self.sink_index = i;
-                }
-                if self.sink_index >= d.sinks.len() {
-                    self.sink_index = 0;
-                }
+                let selected = self.sink().map(|s| s.name.clone());
+                self.sink_index = sink_to_select(
+                    &d.sinks,
+                    [
+                        self.options.sink.as_deref(),
+                        selected.as_deref(),
+                        self.config.sink.as_deref(),
+                        d.preferred_sink.as_deref(),
+                    ],
+                );
                 self.devices = Some(d);
             }
             // Reviewing needs devices only for applying; where there are none (a platform
@@ -983,6 +1025,164 @@ impl App {
         crate::dsp::decay::Waterfall::average(&all)
     }
 
+    /// What the room screen needs from the measurement, when both speakers are measured.
+    fn room_measured(
+        measure: &measure::MeasureState,
+        typical_t60_s: f64,
+    ) -> Option<room::Measured<'_>> {
+        let [Some(l), Some(r)] = &measure.responses else {
+            return None;
+        };
+        let per_measurement: Vec<&[crate::dsp::modes::Mode]> = measure
+            .positions
+            .iter()
+            .flat_map(|runs| runs.iter().map(|a| a.modes.as_slice()))
+            .collect();
+        let merged: Vec<crate::dsp::modes::Mode> = measure
+            .positions
+            .iter()
+            .flat_map(|runs| {
+                let all: Vec<&[crate::dsp::modes::Mode]> =
+                    runs.iter().map(|a| a.modes.as_slice()).collect();
+                crate::dsp::modes::merge(&all)
+            })
+            .collect();
+        // The left/right balance at each low mode, from the mic positions both speakers
+        // were measured from.
+        let pairs: Vec<(
+            &crate::dsp::modes::BassSpectrum,
+            &crate::dsp::modes::BassSpectrum,
+        )> = measure.positions[0]
+            .iter()
+            .zip(&measure.positions[1])
+            .filter_map(|(a, b)| Some((a.bass.as_ref()?, b.bass.as_ref()?)))
+            .collect();
+        let mut modes_hz: Vec<f64> = merged.iter().map(|m| m.hz).collect();
+        modes_hz.sort_by(f64::total_cmp);
+        modes_hz.dedup_by(|a, b| (*a / *b).log2().abs() < 1.0 / 40.0);
+        let balance = crate::dsp::roommodel::left_right_balance(&pairs, &modes_hz);
+        Some(room::Measured {
+            responses: [l, r],
+            per_measurement,
+            merged,
+            balance,
+            typical_t60_s,
+        })
+    }
+
+    /// Brings the room screen up to date with the measurement and the setup.
+    fn refresh_room(&mut self) {
+        let typical = self.room_reverb_s();
+        if let Some(m) = Self::room_measured(&self.measure, typical) {
+            self.room.guess(&m);
+            let _ = self.room.derived(&m);
+        }
+    }
+
+    /// The room's reverberation in the bass, s: what modes that were not measured ring for.
+    #[must_use]
+    pub fn room_reverb_s(&self) -> f64 {
+        let mut all: Vec<f64> = self
+            .measure
+            .positions
+            .iter()
+            .flatten()
+            .flat_map(|a| a.decay.iter().filter(|d| d.0 <= 250.0).map(|d| d.1))
+            .collect();
+        all.sort_by(f64::total_cmp);
+        all.get(all.len() / 2).copied().unwrap_or(0.5)
+    }
+
+    /// Keys on the room screen: fields, numbers, the mode on the plan, the view.
+    fn key_room(&mut self, code: KeyCode) {
+        let r = &mut self.room;
+        match code {
+            KeyCode::Esc if !r.typing.is_empty() => r.typing.clear(),
+            KeyCode::Esc | KeyCode::Char('q' | 'r') => {
+                self.overlay = None;
+                return;
+            }
+            KeyCode::Up => {
+                r.typing.clear();
+                r.field = r.field.saturating_sub(1);
+            }
+            KeyCode::Down => {
+                r.typing.clear();
+                r.field = (r.field + 1).min(room::Field::ALL.len() - 1);
+            }
+            KeyCode::Left | KeyCode::Right if r.typing.is_empty() => {
+                let delta = if code == KeyCode::Left { -0.05 } else { 0.05 };
+                if r.nudge(delta) {
+                    self.message = Some(format!(
+                        "Changing a guess makes it your room {}: saved, and kept for next time.",
+                        r.yours.len()
+                    ));
+                }
+            }
+            KeyCode::Char(c @ ('0'..='9' | '.' | ',')) => r.typing.push(c),
+            KeyCode::Backspace => {
+                r.typing.pop();
+            }
+            KeyCode::Enter => match r.apply_typed() {
+                Ok(true) => {
+                    self.message = Some(format!(
+                        "Changing a guess makes it your room {}: saved, and kept for next time.",
+                        r.yours.len()
+                    ));
+                }
+                Ok(false) => {}
+                Err(text) => {
+                    self.message = Some(format!(
+                        "\"{text}\" is not a distance: type metres, like 5.64."
+                    ));
+                }
+            },
+            KeyCode::Char('x') => self.message = Some(r.delete()),
+            // In the seat map, [ and ] go back to the standing waves.
+            KeyCode::Char('[' | ']') if r.view == room::PlanView::Seats => {
+                r.view = room::PlanView::Mode;
+            }
+            KeyCode::Char('[') => r.mode = r.mode.saturating_sub(1),
+            KeyCode::Char(']') => r.mode += 1,
+            KeyCode::Char('v') => {
+                r.view = match r.view {
+                    room::PlanView::Mode => room::PlanView::Seats,
+                    room::PlanView::Seats => room::PlanView::Mode,
+                };
+            }
+            KeyCode::Char('g' | 'G') => r.step(if code == KeyCode::Char('g') { 1 } else { -1 }),
+            KeyCode::Tab => self.view_channel = 1 - self.view_channel,
+            KeyCode::Char('i') => self.open_overlay(Overlay::Info { technical: false }),
+            _ => {}
+        }
+        if self.room.take_changed() {
+            self.save_rooms();
+        }
+        self.refresh_room();
+        let listed = self.room.current().map_or(0, |d| d.listed.len());
+        self.room.mode = self.room.mode.min(listed.saturating_sub(1));
+    }
+
+    /// Saves the user's rooms in the config, and the one shown with the session (so a
+    /// review finds the room the measurement was made in).
+    fn save_rooms(&mut self) {
+        if self.simulated() {
+            return;
+        }
+        self.config.rooms.clone_from(&self.room.yours);
+        self.config.save();
+        let shown = self.room.setup().filter(|_| !self.room.showing_guess());
+        if let Some(session) = &self.session
+            && let Ok(mut info) = session.load_info()
+            && info.room != shown
+        {
+            info.room = shown;
+            if let Err(e) = session.save_info(&info) {
+                self.set_error(&e);
+            }
+        }
+    }
+
     /// The room modes heard from speaker `c`, merged over its mic positions.
     #[must_use]
     pub fn modes(&self, c: usize) -> Vec<crate::dsp::modes::Mode> {
@@ -1126,8 +1326,10 @@ impl App {
                 self.measure.positions[1].len(),
             ],
             ambient_spl: self.level.ambient_spl,
-            level_spl: Some(self.level.target_spl),
+            level_spl: Some(self.level.set_spl().unwrap_or(self.level.target_spl)),
+            needed_spl: self.level.room_noise.map(|_| self.level.target_spl),
             room_noise_spl: self.level.room_noise.map(|n| n.to_vec()),
+            room: self.room.setup().filter(|_| !self.room.showing_guess()),
         };
         let result = self.session().and_then(|s| s.save_info(&info));
         if let Err(e) = result {
@@ -1152,7 +1354,11 @@ impl App {
             design: &design,
             ambient_spl: self.level.ambient_spl,
             // Only when the level was worked out from the room.
-            level_spl: self.level.room_noise.map(|_| self.level.target_spl),
+            level_spl: self
+                .level
+                .room_noise
+                .map(|_| self.level.set_spl().unwrap_or(self.level.target_spl)),
+            needed_spl: self.level.room_noise.map(|_| self.level.target_spl),
             bass_noise_spl: self.level.room_noise.map(|n| n[1]),
         });
         self.design = Some(design);
@@ -1396,5 +1602,94 @@ impl App {
     #[must_use]
     pub fn verify_responses(&self) -> &[Option<Responses>; 2] {
         &self.measure.verify
+    }
+}
+
+/// The output to select after listing the devices again: the first of `wanted` that is
+/// present, in order of precedence (the command line, the output already selected, the one
+/// saved from last time, the platform's preference); else the first output.
+///
+/// Keeping the selected output by name matters while the app waits for the mic: devices
+/// are listed every second then, and the choice must not drift to the system default.
+fn sink_to_select(sinks: &[Device], wanted: [Option<&str>; 4]) -> usize {
+    wanted
+        .into_iter()
+        .flatten()
+        .find_map(|w| sinks.iter().position(|s| s.name == w))
+        .unwrap_or(0)
+}
+
+/// What to say when `selected` is not `last`, the output the last measurement was made on:
+/// a different output plays the sweeps somewhere else (the laptop's own speakers, say).
+fn output_warning(sinks: &[Device], selected: &Device, last: &str) -> Option<String> {
+    if selected.name == last {
+        return None;
+    }
+    Some(match sinks.iter().find(|s| s.name == last) {
+        Some(s) => format!(
+            "Your last measurement used {}, not the output selected below. Check that the \
+             speakers are connected to the one selected.",
+            s.description
+        ),
+        None => format!(
+            "Your last measurement used an output that is not here now ({last}). If the \
+             speakers are on it, switch it on or plug it in; this list updates with r."
+        ),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn warns_when_the_output_is_not_the_last_one() {
+        let laptop = output("laptop");
+        let mut hdmi = output("hdmi");
+        hdmi.description = "HDMI 4".into();
+        let sinks = [laptop.clone(), hdmi.clone()];
+        assert_eq!(output_warning(&sinks, &hdmi, "hdmi"), None);
+        let other = output_warning(&sinks, &laptop, "hdmi").expect("a warning");
+        assert!(other.contains("HDMI 4"), "{other}");
+        let gone = output_warning(&sinks, &laptop, "usb-dac").expect("a warning");
+        assert!(gone.contains("not here now (usb-dac)"), "{gone}");
+    }
+
+    fn output(name: &str) -> Device {
+        Device {
+            id: name.into(),
+            name: name.into(),
+            description: name.into(),
+            stereo: true,
+        }
+    }
+
+    #[test]
+    fn the_chosen_output_survives_listing_the_devices_again() {
+        let laptop = output("laptop");
+        let speakers = output("speakers");
+        // First listing: nothing selected yet, so the output saved last time wins over the
+        // system default (the laptop).
+        let sinks = [laptop.clone(), speakers.clone()];
+        let first = sink_to_select(&sinks, [None, None, Some("speakers"), Some("laptop")]);
+        assert_eq!(sinks[first].name, "speakers");
+        // The mic is plugged in and the outputs come back in another order: still the
+        // speakers, not the default and not the same index.
+        let sinks = [speakers.clone(), output("hdmi"), laptop.clone()];
+        let again = sink_to_select(
+            &sinks,
+            [None, Some("speakers"), Some("speakers"), Some("laptop")],
+        );
+        assert_eq!(sinks[again].name, "speakers");
+        // A choice made with the arrows beats the saved one.
+        let picked = sink_to_select(&sinks, [None, Some("hdmi"), Some("speakers"), None]);
+        assert_eq!(sinks[picked].name, "hdmi");
+        // The command line beats everything; an output that is gone falls through.
+        let sinks = [laptop, speakers];
+        let named = sink_to_select(&sinks, [Some("speakers"), Some("laptop"), None, None]);
+        assert_eq!(sinks[named].name, "speakers");
+        let gone = sink_to_select(&sinks, [None, Some("hdmi"), None, Some("laptop")]);
+        assert_eq!(sinks[gone].name, "laptop");
+        assert_eq!(sink_to_select(&[], [Some("x"), None, None, None]), 0);
     }
 }

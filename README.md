@@ -62,6 +62,14 @@ More screens:
   notes that ring longest. The room's lowest resonances (modes) are also measured on their
   own, however long they ring: each one's time to fade 60 dB against the rest of the room,
   from its energy decay, cross-checked against the width of its peak.
+- `r` **Room**: your room seen from above, to scale, with the speakers and your seat.
+  From the measurement alone it guesses the room's floor plan and where the speakers stand
+  (on a real living room: the floor plan within 2 % and the right corner), and lists its
+  guesses under your own rooms (`g`/`G`). Change a guess's numbers with a tape measure and it
+  becomes your room, saved in `config.toml` and with the session. Then it names every resonance ("33 Hz: side to side, 5.24 m"), shows where
+  each standing wave is loud (where bass traps work), says how well its model of the room
+  matches the measurement, and, when it does, whether another seat or moving the whole setup
+  would make the bass more even. `v` switches to a map of how even the bass is at each seat.
 - `c` **Curiosities**: the room's resonances and the room dimensions they suggest,
   reverberation time per octave, the strongest early reflection, ringing notes,
   cancellations and broad dips with their likely cause, the speakers' bass and treble

@@ -33,9 +33,10 @@ pub struct Inputs<'a> {
     pub design: &'a Design,
     /// Background noise in the level step's band (500–2000 Hz), dB SPL.
     pub ambient_spl: Option<f64>,
-    /// The measurement level the room called for, dB SPL, and the background in the
-    /// 63 Hz octave, dB SPL.
+    /// The level measured at, the level the room called for, and the background in the
+    /// 63 Hz octave, all dB SPL.
     pub level_spl: Option<f64>,
+    pub needed_spl: Option<f64>,
     pub bass_noise_spl: Option<f64>,
 }
 
@@ -368,20 +369,46 @@ pub fn insights(inp: &Inputs<'_>) -> Vec<Section> {
         .filter(|(f, _)| f.hz <= 150.0 && !dims.iter().any(|d| d.explains.contains(&f.hz)))
         .max_by(|a, b| a.0.db.total_cmp(&b.0.db))
     {
-        room.push(format!(
-            "The strongest resonance{}, {} (+{:.0} dB), would be the first standing wave of a \
-             {:.1} m dimension (or the second of {:.1} m).",
-            if dims.is_empty() {
-                ""
-            } else {
-                " not explained by those"
-            },
-            hz(f.hz),
-            f.db,
-            SPEED_OF_SOUND / (2.0 * f.hz),
-            SPEED_OF_SOUND / f.hz
-        ));
+        // Two dimensions' first standing waves together (around four walls) ring at
+        // √(f₁² + f₂²): a resonance that fits that is not a third pair of walls.
+        let combined = dims.iter().enumerate().find_map(|(i, a)| {
+            dims[i + 1..].iter().find_map(|b| {
+                let (fa, fb) = (
+                    SPEED_OF_SOUND / (2.0 * a.metres),
+                    SPEED_OF_SOUND / (2.0 * b.metres),
+                );
+                ((fa.hypot(fb) / f.hz - 1.0).abs() < 0.025).then_some((a.metres, b.metres))
+            })
+        });
+        room.push(match combined {
+            Some((a, b)) => format!(
+                "The strongest resonance not explained by those, {} (+{:.0} dB), is where the \
+                 {a:.1} m and {b:.1} m dimensions' standing waves meet: one running around four \
+                 walls, strongest in the corners.",
+                hz(f.hz),
+                f.db
+            ),
+            None => format!(
+                "The strongest resonance{}, {} (+{:.0} dB), would be the first standing wave of \
+                 a {:.1} m dimension (or the second of {:.1} m), or two dimensions' waves \
+                 together.",
+                if dims.is_empty() {
+                    ""
+                } else {
+                    " not explained by those"
+                },
+                hz(f.hz),
+                f.db,
+                SPEED_OF_SOUND / (2.0 * f.hz),
+                SPEED_OF_SOUND / f.hz
+            ),
+        });
     }
+    room.push(
+        "Press r for the room seen from above: which standing wave each resonance is, where \
+         bass traps work, and whether another seat would sound more even."
+            .to_owned(),
+    );
     let all: Vec<&SweepAnalysis> = inp.analyses.iter().flat_map(|a| a.iter()).collect();
     let decay: Vec<(f64, f64)> = crate::dsp::room::DECAY_BANDS_HZ
         .iter()
@@ -479,10 +506,19 @@ pub fn insights(inp: &Inputs<'_>) -> Vec<Section> {
         ));
     }
     if let Some(l) = inp.level_spl {
-        room.push(format!(
-            "Measured at {l:.0} dB SPL on the level meter, the quietest level that keeps every \
-             octave about 30 dB above this room's background."
-        ));
+        let needed = inp.needed_spl.unwrap_or(l);
+        room.push(if l > needed + crate::app::level::TOLERANCE {
+            format!(
+                "Measured at {l:.0} dB SPL on the level meter; {needed:.0} dB would have kept \
+                 every octave about 30 dB above this room's background, so the extra was \
+                 margin, not a need."
+            )
+        } else {
+            format!(
+                "Measured at {l:.0} dB SPL on the level meter, the quietest level that keeps \
+                 every octave about 30 dB above this room's background."
+            )
+        });
     }
     sections.push(Section {
         title: "Room",

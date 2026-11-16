@@ -12,6 +12,12 @@ pub struct Config {
     #[serde(default)]
     pub orientation: Orientation,
     pub sink: Option<String>,
+    /// The user's rooms (dimensions, where the speakers and the seat are), as entered.
+    #[serde(default)]
+    pub rooms: Vec<crate::dsp::roommodel::Setup>,
+    /// A single room, as saved before there could be several: read once into `rooms`.
+    #[serde(default, skip_serializing)]
+    pub room: Option<crate::dsp::roommodel::Setup>,
 }
 
 impl Config {

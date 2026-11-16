@@ -201,6 +201,7 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
       <a href="#how">How it works</a>
       <a href="#tour">Tour</a>
       <a href="#treatment">Room treatment</a>
+      <a href="#room">Your room</a>
       <a href="#science">The science</a>
       <a href="#yours">Make it yours</a>
       <a class="gh" href="https://github.com/arturzielazny/correctsound">GitHub</a>
@@ -401,7 +402,7 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
         <div class="text">
           <div class="num">4</div>
           <h3>Level</h3>
-          <p>Keep quiet for a few seconds while CorrectSound listens to your room. You see the background noise in the bass, the mids and the highs, live, and the level the measurement needs to stay 30 dB above it in every octave. Traffic and ventilation rumble in the bass, so that is usually what decides. A quiet room is measured at a comfortable 60 dB; a noisy one asks for up to 80, or for a quieter moment. Then press Enter: pink noise plays from one speaker and you turn the amplifier until the meter shows that level. Above 95 dB it stops by itself.</p>
+          <p>Keep quiet for a few seconds while CorrectSound listens to your room. You see the background noise in the bass, the mids and the highs, live, and the level the measurement needs to stay 30 dB above it in every octave. Traffic and ventilation rumble in the bass, so that is usually what decides. A quiet room is measured at a comfortable 60 dB; a noisy one asks for up to 80, or for a quieter moment. Then press Enter: pink noise plays from one speaker and you turn the amplifier until the meter shows that level. Louder is fine, up to a comfortable 85 dB: the sweeps only gain margin. Above 95 dB it stops by itself.</p>
         </div>
         <figure class="shot zoom"><img loading="lazy" src="img/4a-listening.png" alt="Listening to the room: background noise in bass, mids and highs, and a suggested measurement level of 68 dB SPL"></figure>
       </div>
@@ -532,8 +533,34 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
         <h3 style="margin-top:0">Decay waterfall <kbd>w</kbd></h3>
         <p>How each bass note fades after the sound stops. The back slice is the sound as it starts; each slice in front is 20 ms later. Most notes vanish within a few slices; a resonance stands out as a ridge that runs all the way to the front.</p>
         <p>Notes that ring much longer than the rest sound boomy and smear the bass line. The list beside the waterfall names them. EQ cuts lower them; bass traps in corners, or moving things with <kbd>p</kbd>, treat the cause.</p>
-        <p>The waterfall shows the first 400 ms, but a room's lowest resonances can ring for well over a second. Those are measured on their own, however long they last: each one's time to fade 60 dB, next to the rest of the room's, from how its energy dies away and, as a cross-check, from how narrow its peak is. In one real living room, the length mode at 33 Hz rang for 1.7 s and the width mode at 45 Hz for 1.5 s, while everything else faded in 0.6 s.</p>
+        <p>The waterfall shows the first 400 ms, but a room's lowest resonances can ring for well over a second. Those are measured on their own, however long they last: each one's time to fade 60 dB, next to the rest of the room's, from how its energy dies away and, as a cross-check, from how narrow its peak is. In one real living room, the side-to-side standing wave at 33 Hz rang for 1.7 s and the one running around all four walls at 45 Hz for 1.5 s, while everything else faded in 0.6 s.</p>
         <p><kbd>Tab</kbd> switches speakers on one shared scale, so a quieter speaker sits lower, and it works on saved sessions too: <code>correctsound review</code>, then <kbd>w</kbd>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="room">
+  <div class="wrap">
+    <div class="eyebrow">Room <kbd style="margin-left:6px">r</kbd></div>
+    <h2>Your room from above</h2>
+    <p class="lede">In the bass, a room is a handful of standing waves between its walls, each loud in some places and silent in others. Which ones you hear depends on where the speakers and your seat are. CorrectSound draws your room to scale and shows them.</p>
+    <div class="two" style="margin-top:30px;align-items:start">
+      <div>
+        <h3 style="margin-top:0">Guess first, then measure</h3>
+        <p>From the measurement alone, CorrectSound guesses the room's floor plan and where the speakers stand: it tries the rooms whose standing waves match the resonances it heard and, in each, the layout whose predicted bass matches what the mic heard. Which corner they are in shows in the left/right balance at the lowest standing waves: a speaker near a side wall drives the side-to-side wave harder. In one real living room it found the floor plan within 2 % and the speakers in the right corner. The guesses are listed under your own rooms; change any number with a tape measure (type it, or nudge it 5 cm at a time and watch the prediction follow) and it becomes your room, saved for the next measurement and with the session.</p>
+        <div class="grid g2" style="margin-top:18px">
+          <div class="card"><h3>Which wave is which</h3><p>Every resonance gets a name: "33 Hz: side to side, 5.24 m", "45 Hz: around all four walls". The plan shows where each is loud (red and blue, in opposite phase) and silent.</p></div>
+          <div class="card"><h3>Where traps work</h3><p>A bass trap absorbs a standing wave where it is loud. The walls are marked green where that is: the side walls for one wave, the four corners for another.</p></div>
+          <div class="card"><h3>A better seat</h3><p>Press <kbd>v</kbd> for a map of how even the bass below 80 Hz would be at every seat, and the most even one within reach. It also tries moving the whole setup along the wall.</p></div>
+          <div class="card"><h3>Honest about itself</h3><p>A real room is not a perfect box, so the model is compared with your measurement first. Suggestions appear only when it matches, and you check them with live placement before moving any furniture.</p></div>
+        </div>
+      </div>
+      <div>
+        <figure class="shot zoom"><img loading="lazy" src="img/6f-room.png" alt="Room screen: the room from above with the speakers and the seat, a standing wave's loud and silent places, the measured bass against the room model, and what it means"></figure>
+        <figcaption>On the simulator: the room guessed from the measurement, the 33 Hz standing wave shown, and the model's bass at the seat against the measurement.</figcaption>
+        <figure class="shot zoom" style="margin-top:22px"><img loading="lazy" src="img/6g-room-seats.png" alt="Room screen in seat-map view: green where the bass would be even, red where it would be uneven"></figure>
+        <figcaption>The seat map: green where the bass below 80 Hz would be even, red where it would not; the ring marks the most even seat nearby.</figcaption>
       </div>
     </div>
   </div>
@@ -547,7 +574,7 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
         <h2>What your measurement says about your room</h2>
         <p>A sweep recorded at your seat holds more than a frequency response. CorrectSound reads it for:</p>
         <ul>
-          <li><b>Room dimensions</b>, guessed from the pattern of bass resonances (standing waves between parallel walls).</li>
+          <li><b>Room dimensions</b>, guessed from the pattern of bass resonances (standing waves between parallel walls, and around four walls). <kbd>r</kbd> shows the room from above.</li>
           <li><b>Reverberation time</b> per octave, and whether the room is dry, typical or lively.</li>
           <li><b>The strongest early reflection</b>, its delay and how much longer its path is: 30 cm usually means the desk.</li>
           <li><b>Ringing notes</b>, <b>cancellations</b> and <b>broad dips</b>, with the distance to the surface likely causing them.</li>
@@ -806,6 +833,8 @@ and how you would test it on the simulator. Wait for my go-ahead before writing 
       <a class="zoom" href="img/5d-fast.png"><img loading="lazy" src="img/5d-fast.png" alt="Placement, fast sweeps"><span>Placement: fast sweeps</span></a>
       <a class="zoom" href="img/5c-live.png"><img loading="lazy" src="img/5c-live.png" alt="Placement, live"><span>Placement: live</span></a>
       <a class="zoom" href="img/6c-decay.png"><img loading="lazy" src="img/6c-decay.png" alt="Decay waterfall"><span>Decay waterfall</span></a>
+      <a class="zoom" href="img/6f-room.png"><img loading="lazy" src="img/6f-room.png" alt="Room from above"><span>The room from above (<kbd>r</kbd>)</span></a>
+      <a class="zoom" href="img/6g-room-seats.png"><img loading="lazy" src="img/6g-room-seats.png" alt="Seat map"><span>Seat map (<kbd>v</kbd>)</span></a>
       <a class="zoom" href="img/6b-curiosities.png"><img loading="lazy" src="img/6b-curiosities.png" alt="Curiosities"><span>Curiosities</span></a>
       <a class="zoom" href="img/6d-info.png"><img loading="lazy" src="img/6d-info.png" alt="How it works"><span>How it works (<kbd>i</kbd>)</span></a>
       <a class="zoom" href="img/6e-info-technical.png"><img loading="lazy" src="img/6e-info-technical.png" alt="Technical details"><span>…and the technical version (<kbd>m</kbd>)</span></a>
@@ -843,7 +872,8 @@ correctsound review          # open the newest again, re-analysed, nothing playe
       <tr><td><kbd>m</kbd></td><td>placement</td><td>mode: sweeps, fast sweeps or live noise</td></tr>
       <tr><td><kbd>t</kbd> <kbd>h</kbd> <kbd>f</kbd> <kbd>d</kbd></td><td>result</td><td>tilt, high limit, filter count, back to automatic</td></tr>
       <tr><td><kbd>v</kbd></td><td>save</td><td>verify through EasyEffects</td></tr>
-      <tr><td><kbd>c</kbd> <kbd>w</kbd> <kbd>i</kbd></td><td>after measuring</td><td>curiosities, decay waterfall, how it works</td></tr>
+      <tr><td><kbd>c</kbd> <kbd>w</kbd> <kbd>r</kbd> <kbd>i</kbd></td><td>after measuring</td><td>curiosities, decay waterfall, the room from above, how it works</td></tr>
+      <tr><td><kbd>↑</kbd><kbd>↓</kbd> <kbd>←</kbd><kbd>→</kbd> <kbd>[</kbd><kbd>]</kbd> <kbd>v</kbd> <kbd>g</kbd></td><td>room screen</td><td>choose a number, change it by 5 cm (or type metres and Enter), the standing wave shown, seat map, next room on the list (<kbd>G</kbd> previous; <kbd>x</kbd> twice deletes one of yours)</td></tr>
     </table>
   </div>
 </section>

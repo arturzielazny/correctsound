@@ -20,6 +20,7 @@
 //! The energy decay is what is reported; the width is the cross-check.
 
 use realfft::RealFftPlanner;
+use realfft::num_complex::Complex;
 
 use super::biquad::Biquad;
 
@@ -116,6 +117,34 @@ impl Mode {
     }
 }
 
+/// The bass of one measurement at high resolution, complex, as a room-mode analysis sees
+/// it: the first four seconds of the impulse response from the direct sound on. Phases are
+/// relative to the direct sound, so two measurements from the same mic position can be
+/// compared (left against right) whatever their playback latency.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BassSpectrum {
+    /// Frequency of the first value, Hz.
+    pub from_hz: f64,
+    /// Spacing of the values, Hz.
+    pub bin_hz: f64,
+    pub values: Vec<Complex<f64>>,
+}
+
+impl BassSpectrum {
+    /// The complex response at `hz`: the nearest bin, or `None` outside the range kept.
+    #[must_use]
+    pub fn at(&self, hz: f64) -> Option<Complex<f64>> {
+        let i = ((hz - self.from_hz) / self.bin_hz).round();
+        if i < 0.0 {
+            return None;
+        }
+        self.values.get(i as usize).copied()
+    }
+}
+
+/// Highest frequency kept in a [`BassSpectrum`], Hz.
+const SPECTRUM_TO_HZ: f64 = 160.0;
+
 /// The mode within a twelfth of an octave of `hz`, if any.
 #[must_use]
 pub fn near(modes: &[Mode], hz: f64) -> Option<&Mode> {
@@ -146,17 +175,45 @@ fn stretch(ir: &[f64], peak: usize, from: f64, to: f64, rate: f64) -> Vec<f64> {
 /// sweep's does: its distortion products sit in the last 1.5 s); a shorter one gives none.
 #[must_use]
 pub fn find(ir: &[f64], peak: usize, rate: f64) -> Vec<Mode> {
+    analyse(ir, peak, rate).0
+}
+
+/// [`find`], and the measurement's [`BassSpectrum`] (none for a response too short).
+#[must_use]
+pub fn analyse(ir: &[f64], peak: usize, rate: f64) -> (Vec<Mode>, Option<BassSpectrum>) {
     if (ir.len() as f64) < (SPAN_S + NOISE_S + 1.5) * rate {
-        return Vec::new();
+        return (Vec::new(), None);
     }
-    // High-resolution magnitude, the end tapered over half a second.
+    // High-resolution spectrum, the end tapered over half a second.
     let lead = 0.05;
     let x = stretch(ir, peak, -lead, SPAN_S, rate);
     let taper = 0.5 * rate;
     let weights: Vec<f64> = (0..x.len())
         .map(|i| ((x.len() - i) as f64 / taper).min(1.0))
         .collect();
-    let db = spectrum_db(x.iter().zip(&weights).map(|(v, w)| v * w));
+    let complex = spectrum(x.iter().zip(&weights).map(|(v, w)| v * w));
+    let db: Vec<f64> = complex
+        .iter()
+        .map(|c| super::power_to_db(c.norm_sqr()))
+        .collect();
+    let bin_hz = rate / FFT_LEN as f64;
+    let (k0, k1) = (
+        (FROM_HZ / bin_hz) as usize,
+        (SPECTRUM_TO_HZ / bin_hz) as usize,
+    );
+    // Phases relative to the direct sound: undo the lead.
+    let bass = BassSpectrum {
+        from_hz: k0 as f64 * bin_hz,
+        bin_hz,
+        values: complex[k0..k1]
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let f = (k0 + i) as f64 * bin_hz;
+                c * Complex::from_polar(1.0, -std::f64::consts::TAU * f * lead)
+            })
+            .collect(),
+    };
     // The noise floor: a second of response after the room has died away, scaled to the
     // same window energy, and averaged over ±1 Hz so it is a floor and not noise itself.
     let late = stretch(ir, peak, SPAN_S, SPAN_S + NOISE_S, rate);
@@ -218,11 +275,11 @@ pub fn find(ir: &[f64], peak: usize, rate: f64) -> Vec<Mode> {
     }
     modes.sort_by(|a, b| b.prominence_db.total_cmp(&a.prominence_db));
     modes.truncate(MOST);
-    modes
+    (modes, Some(bass))
 }
 
-/// Power spectrum of `samples`, zero-padded to [`FFT_LEN`], dB.
-fn spectrum_db(samples: impl Iterator<Item = f64>) -> Vec<f64> {
+/// Spectrum of `samples`, zero-padded to [`FFT_LEN`].
+fn spectrum(samples: impl Iterator<Item = f64>) -> Vec<Complex<f64>> {
     let mut buf = vec![0.0; FFT_LEN];
     for (b, v) in buf.iter_mut().zip(samples) {
         *b = v;
@@ -231,7 +288,13 @@ fn spectrum_db(samples: impl Iterator<Item = f64>) -> Vec<f64> {
     let mut out = fft.make_output_vec();
     fft.process(&mut buf, &mut out)
         .expect("buffer sizes match the plan");
-    out.iter()
+    out
+}
+
+/// Power spectrum of `samples`, zero-padded to [`FFT_LEN`], dB.
+fn spectrum_db(samples: impl Iterator<Item = f64>) -> Vec<f64> {
+    spectrum(samples)
+        .iter()
         .map(|c| super::power_to_db(c.norm_sqr()))
         .collect()
 }

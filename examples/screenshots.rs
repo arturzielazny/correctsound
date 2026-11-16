@@ -148,6 +148,14 @@ fn main() {
     press(&mut app, KeyCode::Char('w'));
     shots.take(&app, "6c-decay");
     press(&mut app, KeyCode::Esc);
+    // The room from above: guessed from the measurement, then the seat map.
+    press(&mut app, KeyCode::Char('r'));
+    app.message = None;
+    shots.take(&app, "6f-room");
+    press(&mut app, KeyCode::Char('v'));
+    shots.take(&app, "6g-room-seats");
+    press(&mut app, KeyCode::Char('v'));
+    press(&mut app, KeyCode::Esc);
     press(&mut app, KeyCode::Char('i'));
     shots.take(&app, "6d-info");
     press(&mut app, KeyCode::Char('m'));
@@ -268,12 +276,16 @@ impl Shots {
             .draw(|f| correctsound::ui::draw(f, app, &mut gfx))
             .expect("draw");
         let mut charts = gfx.take_captured();
-        // An overlay hides the step's charts; only the decay overlay draws one of its own,
-        // last.
+        // An overlay hides the step's charts; the decay overlay draws one of its own and
+        // the room overlay two (the plan and the bass at the seat), last.
         match app.overlay {
             Some(Overlay::Decay) => {
                 let last = charts.pop();
                 charts = last.into_iter().collect();
+            }
+            Some(Overlay::Room) => {
+                let keep = charts.len().saturating_sub(2);
+                charts.drain(..keep);
             }
             Some(_) => charts.clear(),
             None => {}

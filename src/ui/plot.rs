@@ -57,13 +57,18 @@ const BASS_TICKS: [(f64, &str); 9] = [
 ];
 const BASS_MINOR: [f64; 6] = [40.0, 60.0, 80.0, 90.0, 250.0, 400.0];
 
-/// Labelled and unlabelled grid frequencies for a span.
-fn ticks(x: HzRange) -> (&'static [(f64, &'static str)], &'static [f64]) {
-    if x.1 / x.0 < 100.0 {
+/// Labelled and unlabelled grid frequencies for a span, those inside it.
+fn ticks(x: HzRange) -> (Vec<(f64, &'static str)>, Vec<f64>) {
+    let (major, minor): (&[(f64, &str)], &[f64]) = if x.1 / x.0 < 100.0 {
         (&BASS_TICKS, &BASS_MINOR)
     } else {
         (&TICKS, &MINOR)
-    }
+    };
+    let inside = |f: f64| f >= x.0 * 0.999 && f <= x.1 * 1.001;
+    (
+        major.iter().copied().filter(|t| inside(t.0)).collect(),
+        minor.iter().copied().filter(|&f| inside(f)).collect(),
+    )
 }
 
 /// What a curve shows, which sets its colour and line.
@@ -357,11 +362,11 @@ fn render(
         c.rect(cut, y0, a - cut, y1 - y0, t.muted, 0.1);
         c.rect(b, y0, x1 - b, y1 - y0, t.muted, 0.22);
     }
-    for &f in minor_ticks {
+    for &f in &minor_ticks {
         let x = x_at(f);
         c.line((x, y0), (x, y1), Pen::solid(t.muted, 0.18, 1.0));
     }
-    for &(f, label) in major_ticks {
+    for &(f, label) in &major_ticks {
         let x = x_at(f);
         c.line((x, y0), (x, y1), Pen::solid(t.muted, 0.45, 1.0));
         let w = Canvas::text_width(font, label, px);
@@ -448,7 +453,7 @@ fn draw_braille(
                     }
                 }
             }
-            for &(f, _) in major_ticks {
+            for &(f, _) in &major_ticks {
                 ctx.draw(&Line::new(f.log10(), lo, f.log10(), hi, grid));
             }
             let (minor, major) = grid_steps(lo, hi);
@@ -474,7 +479,7 @@ fn draw_braille(
                 }
                 ctx.layer();
             }
-            for &(f, label) in major_ticks {
+            for &(f, label) in &major_ticks {
                 let len = label.len() as f64;
                 let x = (f.log10() - cell * len / 2.0).clamp(x0 + cell * 3.0, x1 - cell * len);
                 ctx.print(x, lo, Span::styled(label, Style::default().fg(Color::Gray)));
@@ -639,7 +644,7 @@ fn render_waterfall(c: &mut Canvas, t: &Theme, font: Option<&FontVec>, d: Decay<
     let grid = Pen::solid(t.muted, 0.35, 1.0);
     // The floor: frequency lines running from the front to the back.
     let (bx, by) = shift(0);
-    for &(f, label) in major_ticks {
+    for &(f, label) in &major_ticks {
         let x = x_at(f);
         c.line((x, y1), (x + bx, y1 + by), grid);
         let tw = Canvas::text_width(font, label, px);

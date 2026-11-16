@@ -103,6 +103,26 @@ fn simple_lines() -> Vec<Line<'static>> {
            however long they ring, as the time to fade 60 dB.",
         ),
         gap(),
+        h("Room (r)"),
+        p(
+            "Your room seen from above, with the speakers and your seat. In the bass a room is a \
+           set of standing waves between its walls, each loud in some places and silent in \
+           others; which ones you hear depends on where the speakers and your seat are. From the \
+           measurement alone CorrectSound guesses the room's size and where things are, and \
+           lists its guesses under your own rooms (g/G go through the list). Measure your room \
+           with a tape measure and change the numbers (↑/↓ choose, type metres and Enter, or \
+           ←/→ for 5 cm steps): changing a guess makes it your room. Your rooms are saved in \
+           config.toml and with the session, so a review finds them; x x deletes one.",
+        ),
+        p(
+            "It then names every resonance (\"33 Hz: side to side, 5.24 m\"), shows where each \
+           standing wave is loud (that is where bass traps work), says how well its model of \
+           the room matches what was measured, and, when it does, whether another seat or \
+           moving the whole setup would make the bass more even. v switches the plan to a map \
+           of how even the bass would be at every seat. Check any suggestion with live \
+           placement before moving furniture.",
+        ),
+        gap(),
         h("What EQ can and cannot do"),
         p("It can tame peaks: room resonances and bumps are cut, freely and by up to 12 dB."),
         p("It can lift broad, gentle dips a little (at most 3 dB in the bass, 6 dB above)."),
@@ -305,6 +325,37 @@ fn technical_lines() -> Vec<Line<'static>> {
            narrower than 4 s can resolve (T60 over 3.5 s) are steady hums, not modes. Merged \
            over mic positions by median. On synthetic modes both are within 1–2 % alone and \
            15 % for modes a fifth of an octave apart.",
+        ),
+        gap(),
+        h("Room model"),
+        p(
+            "A rectangular room with reflecting walls: modes up to 200 Hz, each a product of \
+           cosines with f = 343/2·√((l/L)²+(m/W)²+(n/H)²); the pressure at the seat is the modal \
+           sum Σ εψ(source)ψ(seat)·f/(fₙ²−f²+j·f·fₙ/Q) plus the room's compliance term, for a \
+           constant volume-velocity source (Kuttruff, Room Acoustics, ch. 3). Q from each \
+           mode's measured T60 where it was measured, from the room's bass reverberation \
+           elsewhere. The seat is averaged over 9 points ±20 cm (the measurement averages mic \
+           positions).",
+        ),
+        p(
+            "Agreement: model and measurement smoothed to 1/12 octave, each minus its one-octave \
+           trend (which removes the speaker's own roll-off), RMS of the difference from 25 to \
+           60 Hz. On a real living room the true layout gave 2–3 dB, a typical layout 7–8 dB; \
+           above about 70 Hz the box model stops matching (modes crowd, furniture and soft walls \
+           decide). Suggestions are offered only when it is under 5 dB, and only for changes \
+           predicted to make the bass below 80 Hz at least 1 dB more even (seat within 60 cm) \
+           or 1.5 dB (the whole setup moved along or away from the wall).",
+        ),
+        p(
+            "Guess: rooms whose modes explain the resonances heard (weighted by how many \
+           measurements heard each; a penalty for rooms whose modes are so dense that anything \
+           fits), the eight most likely; in each, the layout (speakers side by side, the seat an \
+           equilateral triangle) that best explains both speakers' measured bass (agreement) \
+           and their left/right balance at the modes below 55 Hz (the median over mic \
+           positions of |L/R| at each mode's peak, which does not depend on the mic position and \
+           tells the mirror images apart), ranked by agreement + 0.5 × balance error. On three \
+           real sessions it found the floor plan within 1–2 % and the speakers in the right \
+           corner; the height and the distance from the wall are the least certain.",
         ),
         gap(),
         p("Press m for the plain version, Esc to close."),

@@ -33,8 +33,44 @@ const AMBIENT_KEEP: usize = SAMPLE_RATE as usize * 3;
 /// The suggestion moves down only by this much at once, dB, so it does not flicker; it
 /// moves up at once, the safe direction.
 const SUGGESTION_HYSTERESIS_DB: f64 = 2.0;
-/// Fade-in for every noise start.
-const FADE_IN_SECONDS: usize = 3;
+/// Fade-in for every noise start, ms: short, so the meter shows the level quickly, while
+/// the safety limit ([`ABORT_SPL`]) still catches an amplifier left far too loud.
+const FADE_IN_MS: u64 = 1000;
+/// After the fade-in, the meter's averaging needs this long to settle, ms.
+const METER_SETTLE_MS: u64 = 1000;
+/// Above this the sweeps get uncomfortably loud over a whole measurement, and small
+/// speakers distort in the bass, dB SPL. Up to it, louder than the room needs is fine: the
+/// sweeps only gain margin over the background.
+pub const COMFORT_MAX_SPL: f64 = 85.0;
+
+/// How a meter reading compares with the level the room calls for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reading {
+    /// Below the target: the quietest octaves end up too close to the background.
+    TooQuiet,
+    /// At the target.
+    Right,
+    /// Above the target but not loud: more than needed, and fine.
+    LouderThanNeeded,
+    /// Above [`COMFORT_MAX_SPL`].
+    TooLoud,
+}
+
+impl Reading {
+    /// Judges `spl` against `target`, both dB SPL.
+    #[must_use]
+    pub fn of(spl: f64, target: f64) -> Self {
+        if spl < target - TOLERANCE {
+            Self::TooQuiet
+        } else if spl <= target + TOLERANCE {
+            Self::Right
+        } else if spl <= COMFORT_MAX_SPL.max(target + TOLERANCE) {
+            Self::LouderThanNeeded
+        } else {
+            Self::TooLoud
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum LevelPhase {
@@ -64,6 +100,8 @@ pub struct LevelState {
     pub spl: Option<f64>,
     /// Last steady SPL per channel.
     pub heard: [Option<f64>; 2],
+    /// The level set in a session being reviewed, dB SPL (nothing is heard then).
+    pub reviewed_set_spl: Option<f64>,
     pub sink_volume: Option<f64>,
     stream: Option<Stream>,
     meter: LevelMeter,
@@ -100,6 +138,7 @@ impl LevelState {
             ambient_spl: None,
             spl: None,
             heard: [None, None],
+            reviewed_set_spl: None,
             sink_volume: None,
             stream: None,
             meter: LevelMeter::standard(SAMPLE_RATE),
@@ -181,7 +220,7 @@ impl LevelState {
         self.spl = None;
         let program = Program::Loop {
             signal: Arc::clone(&self.noise),
-            fade_in: FADE_IN_SECONDS * SAMPLE_RATE as usize,
+            fade_in: (FADE_IN_MS * u64::from(SAMPLE_RATE) / 1000) as usize,
         };
         self.stream = Some(audio.start(Source::new(program, channel), Route::Hardware)?);
         self.started = Some(Instant::now());
@@ -197,13 +236,24 @@ impl LevelState {
         }
     }
 
-    /// Seconds into the fade-in, for the "fading in" hint.
+    /// True while the noise fades in and the meter settles, for the "fading in" hint.
     #[must_use]
     pub fn fading_in(&self) -> bool {
         self.phase == LevelPhase::Playing
             && self
                 .started
-                .is_some_and(|t| t.elapsed() < Duration::from_secs(FADE_IN_SECONDS as u64 + 1))
+                .is_some_and(|t| t.elapsed() < Duration::from_millis(FADE_IN_MS + METER_SETTLE_MS))
+    }
+
+    /// The level the amplifier was left at: the louder of the steady readings, dB SPL.
+    #[must_use]
+    pub fn set_spl(&self) -> Option<f64> {
+        self.heard
+            .iter()
+            .flatten()
+            .copied()
+            .reduce(f64::max)
+            .or(self.reviewed_set_spl)
     }
 
     /// Processes captured audio. `cal` corrects the room's noise levels for the mic.
@@ -281,5 +331,21 @@ impl LevelState {
 impl Default for LevelState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn louder_than_needed_is_fine_until_it_gets_loud() {
+        // A quiet room needs 60 dB; 75 is more than needed and fine.
+        assert_eq!(Reading::of(55.0, 60.0), Reading::TooQuiet);
+        assert_eq!(Reading::of(60.8, 60.0), Reading::Right);
+        assert_eq!(Reading::of(75.0, 60.0), Reading::LouderThanNeeded);
+        assert_eq!(Reading::of(88.0, 60.0), Reading::TooLoud);
+        // A target near the comfortable maximum still has its tolerance above it.
+        assert_eq!(Reading::of(85.5, 84.5), Reading::Right);
     }
 }
