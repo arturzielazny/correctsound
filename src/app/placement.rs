@@ -1,6 +1,6 @@
 //! Live placement and room treatment: the bass at the seat, measured over and over while
 //! the speakers, the seat, the mic or a bass trap are moved, with a pinned reading to
-//! compare against.
+//! compare against. The screen's state, its measuring loop and its keys.
 //!
 //! Three ways to measure, all with sweeps, switched with a key:
 //!
@@ -21,7 +21,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
+use crossterm::event::KeyCode;
 
+use super::{App, Env, Purpose, SIM_WALL_START_M};
 use crate::audio::{AudioBackend, Channel, Program, Route, Source, Stream};
 use crate::cal::Calibration;
 use crate::dsp::SAMPLE_RATE;
@@ -532,6 +534,89 @@ impl PlacementState {
                 self.arrived(reading);
                 true
             }
+        }
+    }
+}
+
+// ----- the step's keys and background work -----
+
+impl App {
+    pub(super) fn open_placement(&mut self) {
+        if let Err(e) = self.pre_sweep_checks(Purpose::Measure) {
+            self.measure.issue = Some(format!("{e:#}"));
+            return;
+        }
+        self.measure.issue = None;
+        self.message = None;
+        let mut p = PlacementState::new(Channel::Left, self.measure.sweep_dbfs());
+        if let Env::Sim { state, .. } = &self.env {
+            let mut st = state.lock().expect("sim state lock poisoned");
+            st.wall_m.get_or_insert(SIM_WALL_START_M);
+        }
+        if let Some(audio) = self.audio.as_mut()
+            && let Err(e) = p.start(audio.as_mut())
+        {
+            p.report(format!("{e:#}"));
+        }
+        self.placement = Some(p);
+    }
+
+    /// Keys on the placement screen; false lets the key through to the global ones.
+    pub(super) fn key_placement(&mut self, code: KeyCode) -> bool {
+        let Some(p) = self.placement.as_mut() else {
+            return false;
+        };
+        match code {
+            KeyCode::Esc | KeyCode::Char('p') => {
+                self.placement = None;
+                return true;
+            }
+            KeyCode::Char(' ') => p.pin(),
+            KeyCode::Tab => p.switch_channel(),
+            // The screen shows the mode; no message that would stay behind.
+            KeyCode::Char('m') => p.switch_mode(),
+            KeyCode::Char('s') => {
+                p.paused = !p.paused;
+                if p.paused {
+                    p.stop();
+                }
+            }
+            KeyCode::Left | KeyCode::Right => {
+                let Env::Sim { state, .. } = &self.env else {
+                    return true;
+                };
+                let step = if code == KeyCode::Right { 0.05 } else { -0.05 };
+                // The status line shows the new distance.
+                let mut st = state.lock().expect("sim state lock poisoned");
+                let d = (st.wall_m.unwrap_or(SIM_WALL_START_M) + step).clamp(0.1, 2.0);
+                st.wall_m = Some(d);
+            }
+            _ => return false,
+        }
+        if let Some(audio) = self.audio.as_mut()
+            && let Some(p) = self.placement.as_mut()
+            && let Err(e) = p.start(audio.as_mut())
+        {
+            p.report(format!("{e:#}"));
+        }
+        true
+    }
+
+    pub(super) fn tick_placement(&mut self) {
+        let cal = self
+            .cal
+            .clone()
+            .unwrap_or_else(|| Calibration::from_points(0.0, &[(20.0, 0.0), (20_000.0, 0.0)]));
+        let scale = self.spl_scale();
+        let Some(p) = self.placement.as_mut() else {
+            return;
+        };
+        p.tick(&cal, scale);
+        if let Some(audio) = self.audio.as_mut()
+            && let Err(e) = p.start(audio.as_mut())
+        {
+            p.report(format!("{e:#}"));
+            p.paused = true;
         }
     }
 }

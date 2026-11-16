@@ -28,8 +28,12 @@ src/platform/          the only place that knows about the operating system
 src/audio/             AudioBackend trait (play a Source, record the mic), the room simulator
 src/dsp, src/eq        signal processing and EQ design: pure Rust, no I/O
 src/analysis.rs, src/insights.rs, src/cal.rs, src/session.rs
-src/app/               the wizard's state machine
-src/ui/                drawing (ratatui; charts as images or braille)
+src/app/               the wizard's state machine: mod.rs holds the App, the steps and the
+                       key dispatch; each step has a file of its own (devices, calibration,
+                       mic_gain, level, measure, result, save; placement and room for those
+                       screens) with its state, its keys and its background work
+src/ui/                drawing (ratatui; charts as images or braille): mod.rs the frame,
+                       header, footer and key hints; a file per screen, named as in src/app/
 src/restore.rs         undo steps run on exit, errors, panics and signals
 src/paths.rs           where files go (XDG layout under the home directory, every OS)
 ```

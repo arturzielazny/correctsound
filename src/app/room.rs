@@ -1,9 +1,12 @@
-//! The room screen's state: the room and where the speakers and the seat are (guessed
+//! The room screen's state and keys: the room and where the speakers and the seat are (guessed
 //! from the measurement, or entered with a tape measure), and what the room model says
 //! about them ([`crate::dsp::roommodel`]): which standing wave each measured resonance is,
 //! how well the model reproduces the measurement, where traps would work, and whether
 //! another seat or another place for the whole setup would sound more even.
 
+use crossterm::event::KeyCode;
+
+use super::{App, Overlay, measure};
 use crate::analysis::Responses;
 use crate::dsp::modes::Mode;
 use crate::dsp::roommodel::{
@@ -713,6 +716,181 @@ pub fn trap_advice(mode: &RoomMode) -> &'static str {
         [0, 0, _] => "along the edges of the floor and the ceiling",
         [_, _, 0] => "in the four vertical corners",
         _ => "where the walls meet the floor or the ceiling",
+    }
+}
+
+// ----- the step's keys and background work -----
+
+impl App {
+    /// What the room screen needs from the measurement, when both speakers are measured.
+    pub(super) fn room_measured(
+        measure: &measure::MeasureState,
+        typical_t60_s: f64,
+    ) -> Option<Measured<'_>> {
+        let [Some(l), Some(r)] = &measure.responses else {
+            return None;
+        };
+        let per_measurement: Vec<&[crate::dsp::modes::Mode]> = measure
+            .positions
+            .iter()
+            .flat_map(|runs| runs.iter().map(|a| a.modes.as_slice()))
+            .collect();
+        let merged: Vec<crate::dsp::modes::Mode> = measure
+            .positions
+            .iter()
+            .flat_map(|runs| {
+                let all: Vec<&[crate::dsp::modes::Mode]> =
+                    runs.iter().map(|a| a.modes.as_slice()).collect();
+                crate::dsp::modes::merge(&all)
+            })
+            .collect();
+        // The left/right balance at each low mode, from the mic positions both speakers
+        // were measured from.
+        let pairs: Vec<(
+            &crate::dsp::modes::BassSpectrum,
+            &crate::dsp::modes::BassSpectrum,
+        )> = measure.positions[0]
+            .iter()
+            .zip(&measure.positions[1])
+            .filter_map(|(a, b)| Some((a.bass.as_ref()?, b.bass.as_ref()?)))
+            .collect();
+        let mut modes_hz: Vec<f64> = merged.iter().map(|m| m.hz).collect();
+        modes_hz.sort_by(f64::total_cmp);
+        modes_hz.dedup_by(|a, b| (*a / *b).log2().abs() < 1.0 / 40.0);
+        let balance = crate::dsp::roommodel::left_right_balance(&pairs, &modes_hz);
+        Some(Measured {
+            responses: [l, r],
+            per_measurement,
+            merged,
+            balance,
+            typical_t60_s,
+        })
+    }
+
+    /// Brings the room screen up to date with the measurement and the setup.
+    pub(super) fn refresh_room(&mut self) {
+        let typical = self.room_reverb_s();
+        if let Some(m) = Self::room_measured(&self.measure, typical) {
+            self.room.guess(&m);
+            let _ = self.room.derived(&m);
+        }
+    }
+
+    /// The room's reverberation in the bass, s: what modes that were not measured ring for.
+    #[must_use]
+    pub fn room_reverb_s(&self) -> f64 {
+        let mut all: Vec<f64> = self
+            .measure
+            .positions
+            .iter()
+            .flatten()
+            .flat_map(|a| a.decay.iter().filter(|d| d.0 <= 250.0).map(|d| d.1))
+            .collect();
+        all.sort_by(f64::total_cmp);
+        all.get(all.len() / 2).copied().unwrap_or(0.5)
+    }
+
+    /// Keys on the room screen: fields, numbers, the mode on the plan, the view.
+    pub(super) fn key_room(&mut self, code: KeyCode) {
+        let r = &mut self.room;
+        match code {
+            KeyCode::Esc if !r.typing.is_empty() => r.typing.clear(),
+            KeyCode::Esc | KeyCode::Char('q' | 'r') => {
+                self.overlay = None;
+                return;
+            }
+            KeyCode::Up => {
+                r.typing.clear();
+                r.field = r.field.saturating_sub(1);
+            }
+            KeyCode::Down => {
+                r.typing.clear();
+                r.field = (r.field + 1).min(Field::ALL.len() - 1);
+            }
+            KeyCode::Left | KeyCode::Right if r.typing.is_empty() => {
+                let delta = if code == KeyCode::Left { -0.05 } else { 0.05 };
+                if r.nudge(delta) {
+                    self.message = Some(format!(
+                        "Changing a guess makes it your room {}: saved, and kept for next time.",
+                        r.yours.len()
+                    ));
+                }
+            }
+            KeyCode::Char(c @ ('0'..='9' | '.' | ',')) => r.typing.push(c),
+            // A minus starts a number: the seat left of centre.
+            KeyCode::Char('-') if r.typing.is_empty() => r.typing.push('-'),
+            KeyCode::Char('m') if r.typing.is_empty() => {
+                let new = r.mirror();
+                self.message = Some(if new {
+                    format!(
+                        "Mirrored to the other side wall: your room {}, saved.",
+                        r.yours.len()
+                    )
+                } else {
+                    "Mirrored to the other side wall.".to_owned()
+                });
+            }
+            KeyCode::Backspace => {
+                r.typing.pop();
+            }
+            KeyCode::Enter => match r.apply_typed() {
+                Ok(true) => {
+                    self.message = Some(format!(
+                        "Changing a guess makes it your room {}: saved, and kept for next time.",
+                        r.yours.len()
+                    ));
+                }
+                Ok(false) => {}
+                Err(text) => {
+                    self.message = Some(format!(
+                        "\"{text}\" is not a distance: type metres, like 5.64."
+                    ));
+                }
+            },
+            KeyCode::Char('x') => self.message = Some(r.delete()),
+            // In the seat map, [ and ] go back to the standing waves.
+            KeyCode::Char('[' | ']') if r.view == PlanView::Seats => {
+                r.view = PlanView::Mode;
+            }
+            KeyCode::Char('[') => r.mode = r.mode.saturating_sub(1),
+            KeyCode::Char(']') => r.mode += 1,
+            KeyCode::Char('v') => {
+                r.view = match r.view {
+                    PlanView::Mode => PlanView::Seats,
+                    PlanView::Seats => PlanView::Mode,
+                };
+            }
+            KeyCode::Char('g' | 'G') => r.step(if code == KeyCode::Char('g') { 1 } else { -1 }),
+            KeyCode::Tab => self.view_channel = 1 - self.view_channel,
+            KeyCode::Char('i') => self.open_overlay(Overlay::Info { technical: false }),
+            _ => {}
+        }
+        if self.room.take_changed() {
+            self.save_rooms();
+        }
+        self.refresh_room();
+        let listed = self.room.current().map_or(0, |d| d.listed.len());
+        self.room.mode = self.room.mode.min(listed.saturating_sub(1));
+    }
+
+    /// Saves the user's rooms in the config, and the one shown with the session (so a
+    /// review finds the room the measurement was made in).
+    pub(super) fn save_rooms(&mut self) {
+        if self.simulated() {
+            return;
+        }
+        self.config.rooms.clone_from(&self.room.yours);
+        self.config.save();
+        let shown = self.room.setup().filter(|_| !self.room.showing_guess());
+        if let Some(session) = &self.session
+            && let Ok(mut info) = session.load_info()
+            && info.room != shown
+        {
+            info.room = shown;
+            if let Err(e) = session.save_info(&info) {
+                self.set_error(&e);
+            }
+        }
     }
 }
 

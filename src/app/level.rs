@@ -1,11 +1,13 @@
 //! Step 4: listening to the room's background noise, which sets how loud the measurement
 //! needs to be ([`crate::dsp::ambient`]), then pink noise per channel with a live SPL meter
-//! for setting the amplifier to that level.
+//! for setting the amplifier to that level. The step's state, its keys and its background work.
 
 use std::sync::Arc;
 
 use anyhow::Result;
+use crossterm::event::KeyCode;
 
+use super::{App, Step};
 use crate::audio::{AudioBackend, Channel, Program, Route, Source, Stream};
 use crate::cal::Calibration;
 use crate::dsp::SAMPLE_RATE;
@@ -344,6 +346,71 @@ fn ms_to_samples(ms: u64) -> usize {
 impl Default for LevelState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ----- the step's keys and background work -----
+
+impl App {
+    pub(super) fn key_level(&mut self, code: KeyCode) {
+        let listening = self.level.phase == LevelPhase::Listening;
+        match code {
+            // While listening, Enter or Space starts the noise at the suggested level.
+            KeyCode::Enter | KeyCode::Char(' ') if listening => {
+                if self.level.can_play() {
+                    let ch = self.level.channel;
+                    self.start_noise(ch);
+                } else {
+                    self.message = Some("Still listening to the room; a moment more.".into());
+                }
+            }
+            KeyCode::Tab | KeyCode::Left | KeyCode::Right if !listening => {
+                let ch = self.level.channel.other();
+                self.start_noise(ch);
+            }
+            KeyCode::Char(' ') => {
+                let ch = self.level.channel;
+                self.start_noise(ch);
+            }
+            KeyCode::Char('l') if !listening => {
+                if let Some(audio) = self.audio.as_mut()
+                    && let Err(e) = self.level.start_listening(audio.as_mut())
+                {
+                    self.set_error(&e);
+                }
+            }
+            KeyCode::Up | KeyCode::Down => {
+                let step = if code == KeyCode::Up { 0.02 } else { -0.02 };
+                let Some(sink) = self.sink().cloned() else {
+                    return;
+                };
+                let current = self.system.output_volume(&sink).unwrap_or(1.0);
+                let new = (current + step).clamp(0.0, 1.0);
+                match self.system.set_output_volume(&sink, new) {
+                    Ok(()) => self.level.sink_volume = Some(new),
+                    Err(e) => self.set_error(&e),
+                }
+            }
+            KeyCode::Enter => {
+                if self.level.heard.iter().all(Option::is_none) {
+                    self.message = Some("Let the noise play and set the level first.".into());
+                    return;
+                }
+                self.measure.frozen_volume = self.current_sink_volume();
+                self.go(Step::Measure);
+            }
+            _ => {}
+        }
+    }
+
+    pub(super) fn start_noise(&mut self, channel: Channel) {
+        let scale = self.spl_scale();
+        let Some(audio) = self.audio.as_mut() else {
+            return;
+        };
+        if let Err(e) = self.level.start_noise(audio.as_mut(), channel, scale) {
+            self.set_error(&e);
+        }
     }
 }
 

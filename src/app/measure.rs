@@ -1,10 +1,13 @@
-//! Step 5 (and the verification pass): sweeps per channel, with checks and analysis.
+//! Step 5 (and the verification pass): sweeps per channel, with checks and analysis; the
+//! step's keys, and the session's settings saved with each measurement.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
+use crossterm::event::KeyCode;
 
+use super::{App, Step};
 use crate::analysis::{Responses, responses};
 use crate::audio::{AudioBackend, Channel, Program, Route, Source, Stream};
 use crate::cal::Calibration;
@@ -250,5 +253,155 @@ impl MeasureState {
 impl Default for MeasureState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ----- the step's keys and background work -----
+
+impl App {
+    pub(super) fn key_measure(&mut self, code: KeyCode) {
+        if self.measure.running() {
+            if code == KeyCode::Char('s') {
+                self.measure.cancel();
+                self.message = Some("Measurement stopped.".into());
+            }
+            return;
+        }
+        let have_both = self.measure.positions.iter().all(|p| !p.is_empty());
+        match code {
+            KeyCode::Char('p') => self.open_placement(),
+            KeyCode::Enter if have_both => self.go(Step::Result),
+            KeyCode::Enter | KeyCode::Char('m') => self.start_sweeps(Purpose::Measure),
+            KeyCode::Char('a') if have_both => self.start_sweeps(Purpose::Measure),
+            KeyCode::Char('x') if have_both => {
+                self.measure.positions.iter_mut().for_each(Vec::clear);
+                self.measure.responses = [None, None];
+                self.message = Some("Measurements cleared.".into());
+            }
+            _ => {}
+        }
+    }
+
+    pub(super) fn start_sweeps(&mut self, purpose: Purpose) {
+        if let Err(e) = self.pre_sweep_checks(purpose) {
+            self.measure.issue = Some(format!("{e:#}"));
+            return;
+        }
+        self.measure.issue = None;
+        self.measure.queue = vec![Channel::Left, Channel::Right];
+        self.measure.purpose = purpose;
+        self.next_sweep();
+    }
+
+    pub(super) fn pre_sweep_checks(&mut self, purpose: Purpose) -> Result<()> {
+        let mic = self
+            .mic()
+            .cloned()
+            .ok_or_else(|| anyhow!("the mic disappeared"))?;
+        let gain = self.system.input_gain(&mic)?;
+        if !gain.is_unity() {
+            let now = gain.off_unity();
+            self.mic_gain = Some(gain);
+            return Err(anyhow!(
+                "the mic gain changed since step 3 (now {now}); press Esc and fix it"
+            ));
+        }
+        let now = self.current_sink_volume();
+        if let (Some(frozen), Some(now)) = (self.measure.frozen_volume, now)
+            && (frozen - now).abs() > 0.005
+        {
+            self.measure.frozen_volume = Some(now);
+            return Err(anyhow!(
+                "the output volume changed from {frozen:.2} to {now:.2} since the level was set; \
+                     press Enter to measure at the new volume, or Esc to set the level again"
+            ));
+        }
+        if purpose == Purpose::Verify && self.system.eq_bypass()? != Some(false) {
+            return Err(anyhow!(
+                "{} is bypassed or not running",
+                self.eq_host_name()
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn next_sweep(&mut self) {
+        let Some(audio) = self.audio.as_mut() else {
+            return;
+        };
+        if let Err(e) = self.measure.start_next(audio.as_mut()) {
+            self.measure.issue = Some(format!("{e:#}"));
+            self.measure.queue.clear();
+        }
+    }
+
+    pub(super) fn tick_measure(&mut self) {
+        let sink = self.sink().cloned();
+        match self.measure.tick(self.system.as_mut(), sink.as_ref()) {
+            Tick::Idle | Tick::Running => {}
+            Tick::Failed => {}
+            Tick::Captured(channel, recording) => self.sweep_done(channel, &recording),
+        }
+    }
+
+    pub(super) fn sweep_done(&mut self, channel: Channel, recording: &[f32]) {
+        let purpose = self.measure.purpose;
+        let position = self.measure.positions[channel.index()].len();
+        let saved = self.session().and_then(|s| match purpose {
+            Purpose::Measure => s.save_capture(channel, position, recording),
+            Purpose::Verify => s.save_verify_capture(channel, recording),
+        });
+        if let Err(e) = saved {
+            self.set_error(&e);
+        }
+        match self.measure.analyze(recording) {
+            Ok(analysis) => {
+                let cal = self.cal.clone().unwrap_or_else(|| {
+                    Calibration::from_points(0.0, &[(20.0, 0.0), (20_000.0, 0.0)])
+                });
+                let scale = self.spl_scale();
+                self.measure.accept(channel, analysis, &cal, scale);
+                if purpose == Purpose::Measure {
+                    self.save_session_info();
+                }
+                if self.measure.queue.is_empty() {
+                    if purpose == Purpose::Verify {
+                        self.finish_verify();
+                    }
+                } else {
+                    self.next_sweep();
+                }
+            }
+            Err(issue) => {
+                self.measure.issue = Some(format!("{} channel: {issue}", channel.name()));
+                self.measure.queue.clear();
+            }
+        }
+    }
+
+    pub(super) fn save_session_info(&mut self) {
+        let info = crate::session::SessionInfo {
+            created: chrono::Local::now().to_rfc3339(),
+            mic_serial: self.cal.as_ref().and_then(|c| c.serial.clone()),
+            calibration_file: self.cal_path.clone(),
+            sens_factor: self.cal.as_ref().map_or(0.0, |c| c.sens_factor),
+            spl_offset_db: self.spl_scale().offset_db,
+            sweep_dbfs: self.measure.sweep_dbfs(),
+            sink: self.sink().map(|s| s.name.clone()).unwrap_or_default(),
+            simulated: self.simulated(),
+            positions: [
+                self.measure.positions[0].len(),
+                self.measure.positions[1].len(),
+            ],
+            ambient_spl: self.level.ambient_spl,
+            level_spl: Some(self.level.set_spl().unwrap_or(self.level.target_spl)),
+            needed_spl: self.level.room_noise.map(|_| self.level.target_spl),
+            room_noise_spl: self.level.room_noise.map(|n| n.to_vec()),
+            room: self.room.setup().filter(|_| !self.room.showing_guess()),
+        };
+        let result = self.session().and_then(|s| s.save_info(&info));
+        if let Err(e) = result {
+            self.set_error(&e);
+        }
     }
 }
