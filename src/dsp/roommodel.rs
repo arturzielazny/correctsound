@@ -229,7 +229,8 @@ impl RoomMode {
 
     /// Weight of the mode in the modal sum: modes with more non-zero orders have a smaller
     /// normalisation integral (`1/2` per non-zero order), so a larger weight.
-    fn weight(&self) -> f64 {
+    #[must_use]
+    pub fn weight(&self) -> f64 {
         f64::from(1u32 << self.order.iter().filter(|&&n| n > 0).count())
     }
 }
@@ -671,6 +672,21 @@ pub fn guess_rooms(resonances: &[(f64, f64)], most: usize) -> Vec<Room> {
         .filter(|l| (2.0..=9.0).contains(l))
         .map(|l| (l * 100.0).round() / 100.0)
         .collect();
+    // A dimension heard only through a wave around four walls: when `f₂` is the wave
+    // around the walls `f₁` runs between and another pair, `√(f₂² − f₁²)` is that other
+    // pair's own wave. It is easily missed on its own when it sits next to a stronger one
+    // (30.4 Hz beside 33 Hz in a 5.64 × 5.24 m room), but the wave around all four walls
+    // gives it away.
+    for (i, &(f1, _)) in resonances.iter().enumerate() {
+        for &(f2, _) in &resonances[i + 1..] {
+            let (lo, hi) = if f1 < f2 { (f1, f2) } else { (f2, f1) };
+            let hidden = (hi * hi - lo * lo).sqrt();
+            let l = SPEED_OF_SOUND / (2.0 * hidden);
+            if hi < 2.0 * lo && (2.0..=9.0).contains(&l) {
+                lengths.push((l * 100.0).round() / 100.0);
+            }
+        }
+    }
     lengths.sort_by(f64::total_cmp);
     lengths.dedup();
     let mut heights: Vec<f64> = vec![2.4, 2.5, 2.6, 2.7, 2.8, 3.0];

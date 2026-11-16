@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
+use super::scene::{Scene, ScenePath};
 use super::{AudioBackend, Channel, Route, Source, Stream};
 use crate::cal::Calibration;
 use crate::dsp::biquad::{Biquad, BiquadState};
@@ -67,6 +68,10 @@ pub struct SimConfig {
     pub rumble_dbfs: f64,
     /// 1.0 = real time; larger values run measurements faster.
     pub speed: f64,
+    /// A real room behind the sound ([`Scene`]): when set, the bass and the reflections come
+    /// from its size and where the speakers and the mic are, and `rooms` describe only the
+    /// speakers themselves.
+    pub scene: Option<Scene>,
 }
 
 impl Default for SimConfig {
@@ -114,11 +119,27 @@ impl Default for SimConfig {
             noise_dbfs: -95.0,
             rumble_dbfs: -52.0,
             speed: 1.0,
+            scene: None,
         }
     }
 }
 
 impl SimConfig {
+    /// The speakers of [`SimConfig::default`] in a real room ([`Scene::living_room`]): moving
+    /// the mic or the speakers changes the bass as it would at home, and the room screen can
+    /// be checked against a room whose size and layout are known.
+    #[must_use]
+    pub fn living_room() -> Self {
+        let mut config = Self::default();
+        for room in &mut config.rooms {
+            // The speakers' own character only: the room adds its resonances and reflections.
+            room.resonances.retain(|&(hz, _, _)| hz > 300.0);
+            room.reflections.clear();
+        }
+        config.scene = Some(Scene::living_room());
+        config
+    }
+
     /// Calibration file describing the simulated mic.
     #[must_use]
     pub fn calibration(&self) -> Calibration {
@@ -143,6 +164,18 @@ pub struct SimState {
     /// Distance from the speakers to the wall behind them, m, once the placement screen
     /// has moved them; its bass reflection cancels around a quarter wavelength.
     pub wall_m: Option<f64>,
+    /// Which mic position is being measured (each added position moves the mic, see
+    /// [`crate::audio::scene::MIC_OFFSETS`]); only a [`Scene`] hears the difference.
+    pub mic_position: usize,
+    /// False until the simulated mic is plugged in.
+    pub mic_plugged: bool,
+    /// Outputs besides the speakers, `(name, description)`: the mic hardly hears them, as it
+    /// would not hear a laptop's own speakers across the room.
+    pub other_outputs: Vec<(String, String)>,
+    /// The system's default output, when not the speakers.
+    pub default_output: Option<String>,
+    /// Streams started so far: each gets its own noise, the same on every run.
+    pub streams: u64,
 }
 
 impl Default for SimState {
@@ -151,6 +184,11 @@ impl Default for SimState {
             sink_volume: 0.8,
             eq: None,
             wall_m: None,
+            mic_position: 0,
+            mic_plugged: true,
+            other_outputs: Vec::new(),
+            default_output: None,
+            streams: 0,
         }
     }
 }
@@ -206,6 +244,11 @@ struct Chain {
     room: Vec<Biquad>,
     room_state: Vec<BiquadState>,
     reflections: Vec<(usize, f64)>,
+    /// The real room's path, when there is a [`Scene`]: then the fixed reflections and the
+    /// wall below are not used.
+    scene: Option<ScenePath>,
+    /// Where the scene's path was worked out for: the wall distance and the mic position.
+    scene_at: (Option<f64>, usize),
     /// Room output before reflections, for the reflection taps.
     dry: Vec<f64>,
     /// Room output with reflections, for the propagation delay.
@@ -247,7 +290,13 @@ impl Chain {
             _ => (Vec::new(), 1.0),
         };
         let filters = room.filters();
+        let scene = config
+            .scene
+            .as_ref()
+            .map(|s| s.path(channel.index(), st.wall_m, st.mic_position));
         Self {
+            scene,
+            scene_at: (st.wall_m, st.mic_position),
             eq_state: vec![BiquadState::default(); eq.len()],
             eq,
             eq_gain,
@@ -288,7 +337,14 @@ impl Chain {
 
     /// Moves the wall behind the speaker (or removes it), keeping the sound already in
     /// flight: a real room changes while the music plays.
-    fn set_wall(&mut self, wall_m: Option<f64>) {
+    fn set_wall(&mut self, wall_m: Option<f64>, scene: Option<(&Scene, usize, usize)>) {
+        if let (Some(path), Some((s, channel, position))) = (&mut self.scene, scene) {
+            if self.scene_at != (wall_m, position) {
+                path.move_to(s.path(channel, wall_m, position));
+                self.scene_at = (wall_m, position);
+            }
+            return;
+        }
         match (wall_m, &mut self.wall) {
             (Some(d), Some((_, _, delay, gain))) => (*delay, *gain) = wall_reflection(d),
             (Some(d), None) => {
@@ -314,15 +370,20 @@ impl Chain {
                 x = b.tick(s, x);
             }
             let at = |back: usize| (self.pos + HISTORY - back) % HISTORY;
-            self.dry[at(0)] = x;
-            let mut y = x;
-            for &(d, g) in &self.reflections {
-                y += g * self.dry[at(d)];
-            }
-            if let Some((lp, state, delay, gain)) = &mut self.wall {
-                self.bass[at(0)] = lp.tick(state, x);
-                y += *gain * self.bass[at(*delay)];
-            }
+            let y = if let Some(path) = &mut self.scene {
+                path.tick(x)
+            } else {
+                self.dry[at(0)] = x;
+                let mut y = x;
+                for &(d, g) in &self.reflections {
+                    y += g * self.dry[at(d)];
+                }
+                if let Some((lp, state, delay, gain)) = &mut self.wall {
+                    self.bass[at(0)] = lp.tick(state, x);
+                    y += *gain * self.bass[at(*delay)];
+                }
+                y
+            };
             self.wet[at(0)] = y;
             let delayed = self.wet[at(self.delay)];
             self.pos += 1;
@@ -343,8 +404,13 @@ impl AudioBackend for SimBackend {
         let config = Arc::clone(&self.config);
         let state = Arc::clone(&self.state);
         let (stop2, finished2) = (Arc::clone(&stop), Arc::clone(&finished));
+        // Each stream's noise comes from its number: the same on every run.
+        let seed = {
+            let mut st = self.state.lock().expect("sim state lock poisoned");
+            st.streams += 1;
+            st.streams ^ 0x5eed
+        };
         thread::spawn(move || {
-            let seed = Instant::now().elapsed().as_nanos() as u64 ^ 0x5eed;
             let mut chain = Chain::new(&config, &state, source.channel, route, seed);
             let block = 1024usize;
             let start = Instant::now();
@@ -353,13 +419,17 @@ impl AudioBackend for SimBackend {
                 let mut buf = vec![0f32; block];
                 source.fill_mono(&mut buf);
                 // Volume and wall changes apply live, as in a real room.
-                let (vol, wall_m) = {
+                let (vol, wall_m, position) = {
                     let st = state.lock().expect("sim state lock poisoned");
-                    (st.sink_volume, st.wall_m)
+                    (st.sink_volume, st.wall_m, st.mic_position)
                 };
                 let room_gain = db_to_amplitude(config.rooms[source.channel.index()].gain_db);
                 chain.gain = room_gain * vol.powi(3);
-                chain.set_wall(wall_m);
+                let scene = config
+                    .scene
+                    .as_ref()
+                    .map(|s| (s, source.channel.index(), position));
+                chain.set_wall(wall_m, scene);
                 chain.process(&mut buf);
                 frames += block;
                 if source.is_done() {

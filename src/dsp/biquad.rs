@@ -62,6 +62,16 @@ impl Biquad {
         )
     }
 
+    /// Band-pass filter with 0 dB at its centre: `(s·ω₀/Q) / (s² + s·ω₀/Q + ω₀²)`, the shape
+    /// of one resonance of a room (the simulator sums them, one per standing wave).
+    #[must_use]
+    pub fn band_pass(rate: f64, freq: f64, q: f64) -> Self {
+        let w0 = TAU * freq / rate;
+        let alpha = w0.sin() / (2.0 * q);
+        let cos = w0.cos();
+        Self::normalise(alpha, 0.0, -alpha, 1.0 + alpha, -2.0 * cos, 1.0 - alpha)
+    }
+
     /// High-shelf filter with shelf slope S = 1.
     #[must_use]
     pub fn high_shelf(rate: f64, freq: f64, gain_db: f64) -> Self {
@@ -142,6 +152,20 @@ mod tests {
             let got = bq.magnitude_db(RATE, f);
             assert!((got - g).abs() < 1e-9, "f={f} g={g}: got {got}");
         }
+    }
+
+    #[test]
+    fn band_pass_peaks_at_0_db_and_its_width_follows_q() {
+        let (f, q) = (45.0, 10.0);
+        let bq = Biquad::band_pass(RATE, f, q);
+        assert!(bq.magnitude_db(RATE, f).abs() < 1e-6);
+        // Half power at the band edges, f·(√(1 + 1/4Q²) ± 1/2Q).
+        let half = (1.0 + 1.0 / (4.0 * q * q)).sqrt();
+        for edge in [f * (half - 0.5 / q), f * (half + 0.5 / q)] {
+            let got = bq.magnitude_db(RATE, edge);
+            assert!((got + 3.01).abs() < 0.05, "{edge} Hz: {got}");
+        }
+        assert!(bq.magnitude_db(RATE, 4.5) < -25.0);
     }
 
     #[test]

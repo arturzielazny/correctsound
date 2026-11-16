@@ -3,6 +3,7 @@
 //! [`AudioBackend`] is implemented per platform (see [`crate::platform`]) and by the
 //! simulator in [`sim`].
 
+pub mod scene;
 pub mod sim;
 
 use std::sync::Arc;

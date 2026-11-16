@@ -37,7 +37,11 @@ impl SimSystem {
     }
 }
 
-const SINK: &str = "sim_output.analog-stereo";
+/// The output the simulated speakers are on.
+pub const SINK: &str = "sim_output.analog-stereo";
+/// How much quieter the mic hears an output other than the speakers, dB (a laptop's own
+/// speakers across the room).
+const OTHER_OUTPUT_DB: f64 = -45.0;
 
 impl System for SimSystem {
     fn name(&self) -> &'static str {
@@ -49,20 +53,33 @@ impl System for SimSystem {
     }
 
     fn devices(&mut self) -> Result<Devices> {
+        let st = self.lock();
+        let mut sinks: Vec<Device> = st
+            .other_outputs
+            .iter()
+            .enumerate()
+            .map(|(i, (name, description))| Device {
+                id: format!("{}", 10 + i),
+                name: name.clone(),
+                description: description.clone(),
+                stereo: true,
+            })
+            .collect();
+        sinks.push(Device {
+            id: "2".into(),
+            name: SINK.into(),
+            description: "Simulated speakers".into(),
+            stereo: true,
+        });
         Ok(Devices {
-            mic: Some(Device {
+            mic: st.mic_plugged.then(|| Device {
                 id: "1".into(),
                 name: "sim_input.UMIK-1".into(),
                 description: "Simulated UMIK-1".into(),
                 stereo: false,
             }),
-            sinks: vec![Device {
-                id: "2".into(),
-                name: SINK.into(),
-                description: "Simulated speakers".into(),
-                stereo: true,
-            }],
-            preferred_sink: Some(SINK.into()),
+            preferred_sink: Some(st.default_output.clone().unwrap_or_else(|| SINK.into())),
+            sinks,
             other_streams: vec![],
             eq_host: Some(EqHost {
                 name: "EasyEffects".into(),
@@ -119,11 +136,14 @@ impl System for SimSystem {
         Ok(())
     }
 
-    fn audio(&mut self, _mic: &Device, _sink: &Device) -> Box<dyn AudioBackend> {
-        Box::new(SimBackend::new(
-            self.config.clone(),
-            Arc::clone(&self.state),
-        ))
+    fn audio(&mut self, _mic: &Device, sink: &Device) -> Box<dyn AudioBackend> {
+        let mut config = self.config.clone();
+        if sink.name != SINK {
+            for room in &mut config.rooms {
+                room.gain_db += OTHER_OUTPUT_DB;
+            }
+        }
+        Box::new(SimBackend::new(config, Arc::clone(&self.state)))
     }
 
     fn check_routing(&mut self, _route: Route, _sink: &Device) -> Result<Routing> {

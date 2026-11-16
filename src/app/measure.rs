@@ -272,8 +272,17 @@ impl App {
             KeyCode::Char('p') => self.open_placement(),
             KeyCode::Enter if have_both => self.go(Step::Result),
             KeyCode::Enter | KeyCode::Char('m') => self.start_sweeps(Purpose::Measure),
-            KeyCode::Char('a') if have_both => self.start_sweeps(Purpose::Measure),
+            KeyCode::Char('a') if have_both => {
+                // The simulated mic moves to its next position, as the person would.
+                if let Some(state) = self.sim_state() {
+                    state.lock().expect("sim state lock poisoned").mic_position += 1;
+                }
+                self.start_sweeps(Purpose::Measure);
+            }
             KeyCode::Char('x') if have_both => {
+                if let Some(state) = self.sim_state() {
+                    state.lock().expect("sim state lock poisoned").mic_position = 0;
+                }
                 self.measure.positions.iter_mut().for_each(Vec::clear);
                 self.measure.responses = [None, None];
                 self.message = Some("Measurements cleared.".into());

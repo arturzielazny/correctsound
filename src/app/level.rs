@@ -40,6 +40,9 @@ const FADE_IN_MS: u64 = 500;
 /// Recording after the fade-in starts before the meter starts afresh, ms: the fade plus
 /// the output's latency, so the quiet start does not drag the average down.
 const METER_RESTART_MS: u64 = FADE_IN_MS + 150;
+/// The noise is taken not to reach the mic when the meter reads less than this above the
+/// room's background, dB.
+const UNHEARD_DB: f64 = 10.0;
 /// After that, the meter's averaging needs this long before a reading counts, ms.
 const METER_SETTLE_MS: u64 = 300;
 /// Above this the sweeps get uncomfortably loud over a whole measurement, and small
@@ -335,6 +338,19 @@ impl LevelState {
     #[must_use]
     pub fn room_is_noisy(&self) -> bool {
         self.ambient_spl.is_some_and(|a| a > self.target_spl - 25.0)
+    }
+
+    /// True when the noise plays but the meter reads hardly more than the room's own
+    /// background: the sound is not reaching the mic, most likely because it goes to an
+    /// output the speakers are not on.
+    #[must_use]
+    pub fn noise_unheard(&self) -> bool {
+        self.phase == LevelPhase::Playing
+            && !self.fading_in()
+            && self
+                .spl
+                .zip(self.ambient_spl)
+                .is_some_and(|(s, a)| s < a + UNHEARD_DB)
     }
 }
 

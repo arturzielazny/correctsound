@@ -26,6 +26,8 @@ src/platform/          the only place that knows about the operating system
   linux/               PipeWire (pw-cat, pw-dump, wpctl), ALSA (amixer), EasyEffects
   sim.rs               the simulated platform: tests and --simulate, on every OS
 src/audio/             AudioBackend trait (play a Source, record the mic), the room simulator
+                       (sim.rs), and a real room for it (scene.rs: the room model's standing
+                       waves and the walls' reflections, from where the speakers and mic are)
 src/dsp, src/eq        signal processing and EQ design: pure Rust, no I/O
 src/analysis.rs, src/insights.rs, src/cal.rs, src/session.rs
 src/app/               the wizard's state machine: mod.rs holds the App, the steps and the
@@ -120,7 +122,10 @@ cargo test
 ```
 
 Add tests for new behaviour, preferably end to end against the simulator like
-`tests/pipeline.rs` and `tests/wizard.rs`. If a screen changed, regenerate the website's
+`tests/pipeline.rs`, `tests/wizard.rs` and `tests/scenarios.rs`. A bug found in real use
+gets a scenario that fails without the fix: the simulator can unplug the mic, add outputs,
+move the mic between positions and put the speakers in a room of known size
+(`SimConfig::living_room`, `SimState`). If a screen changed, regenerate the website's
 screenshots: `cargo run --release --example screenshots -- docs/img` (needs fontconfig).
 
 Code style: each file starts with a comment saying what it is for; messages to the user

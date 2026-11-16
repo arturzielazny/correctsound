@@ -116,6 +116,15 @@ pub(super) fn level(frame: &mut Frame<'_>, area: Rect, app: &App) {
     if let LevelPhase::Stopped(reason) = &l.phase {
         lines.push(Line::from(bad(reason)));
     }
+    if l.noise_unheard() {
+        let output = app
+            .sink()
+            .map_or("the selected output", |s| s.description.as_str());
+        lines.push(Line::from(bad(&format!(
+            "The mic hardly hears the noise: is {output} the output the speakers are on? \
+             Check it on the first step (Esc goes back), and that the amplifier is on."
+        ))));
+    }
     match spl.map(|s| Reading::of(s, target)) {
         Some(Reading::LouderThanNeeded) => lines.push(Line::from(ok(&format!(
             "Louder than this room needs ({target:.0} dB), which is fine: the sweeps only gain \

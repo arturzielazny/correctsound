@@ -109,6 +109,7 @@ fn main() -> Result<()> {
             spl_offset: cli.spl_offset,
             sink: cli.sink,
             review: None,
+            ..Options::default()
         }),
     }
 }

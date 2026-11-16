@@ -48,6 +48,10 @@ pub struct Options {
     pub sink: Option<String>,
     /// Open this saved session for review instead of measuring.
     pub review: Option<PathBuf>,
+    /// The simulated room and speakers, when simulating ([`SimConfig::default`] if not set).
+    pub sim_config: Option<SimConfig>,
+    /// The simulated devices as they start (which outputs, whether the mic is plugged in).
+    pub sim_state: Option<SimState>,
 }
 
 /// A screen shown over the wizard.
@@ -221,10 +225,10 @@ impl App {
         };
         let (env, system, missing_tools): (Env, Box<dyn System>, Vec<String>) = if options.simulate
         {
-            let state = Arc::new(Mutex::new(SimState::default()));
+            let state = Arc::new(Mutex::new(options.sim_state.clone().unwrap_or_default()));
             let config = SimConfig {
                 speed: 4.0,
-                ..SimConfig::default()
+                ..options.sim_config.clone().unwrap_or_default()
             };
             (
                 Env::Sim {
@@ -650,6 +654,16 @@ impl App {
             .collect();
         all.sort_by(f64::total_cmp);
         all.get(all.len() / 2).copied()
+    }
+
+    /// The simulator's state, when simulating: tests plug the mic in, add outputs or move
+    /// things through it.
+    #[must_use]
+    pub fn sim_state(&self) -> Option<Arc<Mutex<SimState>>> {
+        match &self.env {
+            Env::Sim { state, .. } => Some(Arc::clone(state)),
+            Env::Real => None,
+        }
     }
 
     /// The simulated wall distance, when simulating.

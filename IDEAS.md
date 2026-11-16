@@ -97,6 +97,39 @@ is that every port adds a module under `src/platform/` and leaves the rest alone
 - Fold the room model into the EQ: the 0.5 s analysis window understates a mode that rings
   1.7 s by 2–3 dB (measured on the simulator), which the model can correct.
 
+## Faster feedback in placement, keeping the quality
+
+The idea: overlap the sweeps. Start the next sweep two seconds after the previous one
+instead of waiting for it to end, so a full-length sweep finishes every two seconds.
+
+It works in principle. Exponential sweeps can overlap (the multiple exponential sweep method,
+Majdak, Balazs and Laback, JAES 2007): deconvolving one sweep turns the others into copies of
+the room's impulse response shifted by the offset, with their distortion products just before
+them, so they stay apart as long as the room has died away within the offset.
+
+Two catches make it a weaker deal than it looks for one speaker:
+
+- **The level.** A 5.5 s sweep restarted every 2 s means about three sweeps sounding at once;
+  their sum peaks up to three times higher, so each must play about 9 dB quieter to avoid
+  clipping. That gives back most of what the long sweep gains in signal-to-noise (5.5 s
+  against 2 s is +4.4 dB).
+- **The latency.** Each result still describes the last 5.5 s, so after moving a trap the curve
+  shows the change fully only a whole sweep later. The updates come faster; the answer
+  doesn't.
+
+**What to build instead: a 2-second looped sweep.** The fast sweeps already loop a 1 s sweep
+and recompute five times a second; a 2 s period gives a full-quality result from the latest
+two seconds every 0.2 s, 0.5 Hz bins, a change shown within two seconds, and room for a
+decay of about 1.7 s, so the waterfall would finally show the 33 and 45 Hz modes that ring
+1.5–1.7 s in the room this was tested in (the 1 s loop cuts them off at 0.7 s). It could
+replace the sweeps mode, whose 1.4 s sweeps with pauses give the same detail less often.
+
+**Where overlapping does pay: two speakers.** The method was made for several loudspeakers:
+on the measure step, the right speaker's sweep could start while the left one's is still
+running, offset by more than the room's decay, halving the time a measurement takes, with
+each speaker playing at full level (they are different sources, so nothing has to be turned
+down).
+
 ## Done
 
 - **Platform layer** (`src/platform/`): the first step towards other operating systems,
@@ -122,6 +155,14 @@ is that every port adds a module under `src/platform/` and leaves the rest alone
   lower crest factor than noise, so more signal at the same peak level. The most even
   curve so far (faded green) is gone: it cluttered the chart; the pinned curve is drawn
   solid and dimmer, behind the latest.
+- **A richer simulator**: `SimConfig::living_room` puts the speakers in a room of known
+  size; the bass comes from the room model's standing waves (one band-pass filter each, so
+  they ring as long as the model says) and the treble from the direct sound and the six
+  walls' first reflections. Each added mic position moves the mic 25 cm. `SimState` can
+  unplug the mic, add outputs and change the default. `tests/scenarios.rs` uses it: a mic
+  plugged in late, the wrong output (now named on the level step), and the room screen
+  finding a 5.64 × 5.24 m room and its right-hand corner from the measurement alone, which
+  first needed the guess to infer a length heard only through a wave around four walls.
 - **Ultrawide terminals**: charts wider than 256 cells are sent as tiles, because one
   kitty-protocol image (Unicode placeholders) spans at most 297 columns.
 - **Decay (waterfall) view** (`w`): cumulative spectral decay of the bass, and the notes
