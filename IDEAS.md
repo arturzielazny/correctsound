@@ -128,11 +128,44 @@ decay of about 1.7 s, so the waterfall would finally show the 33 and 45 Hz modes
 1.5–1.7 s in the room this was tested in (the 1 s loop cuts them off at 0.7 s). It could
 replace the sweeps mode, whose 1.4 s sweeps with pauses give the same detail less often.
 
-**Where overlapping does pay: two speakers.** The method was made for several loudspeakers:
-on the measure step, the right speaker's sweep could start while the left one's is still
-running, offset by more than the room's decay, halving the time a measurement takes, with
-each speaker playing at full level (they are different sources, so nothing has to be turned
-down).
+**Where overlapping does pay: both speakers at once.** The method was made for several
+loudspeakers: on the measure step, the right speaker's sweep starts while the left one's is
+still playing, and one deconvolution gives both impulse responses, the right one `Δ` later.
+Each speaker plays at full level (they are different sources: nothing has to be turned down).
+
+Tried on the simulated living room (5.64 × 5.24 m, the 33 and 45 Hz waves ringing 1.5–1.6 s)
+with speaker distortion added (2nd harmonic −40 dB, 3rd −50 dB), each speaker's result from
+the overlapped recording against measuring it alone:
+
+| Δ | time per mic position | EQ curve (0.5 s window) | decay of the room's waves |
+|---|---|---|---|
+| 0.5 s | 8.0 s | up to 0.5 dB off | lost (see below) |
+| 1.0 s | 8.5 s | 0.1 dB | lost |
+| 1.5–4 s | 9.0–11.5 s | identical | lost |
+| 5.0 s | 12.5 s | identical | as alone |
+| one after the other | 14.9 s | | |
+
+- **The EQ curves** need `Δ` ≥ 1.5 s: below that the right speaker's distortion products,
+  which arrive 0.5 s (2nd) and 0.8 s (3rd) before its impulse response, fall inside the left
+  speaker's 0.5 s window.
+- **The decay of the room's waves** is lost until `Δ` = 5 s only because `modes::find` takes
+  its noise floor 4–5 s after the impulse, where the right speaker's sound now is. Taken from
+  a clean stretch instead (before the right speaker's distortion arrives, or after its tail),
+  the real limit is that distortion landing on the left speaker's still-ringing tail: the
+  33 Hz wave needs about 1 s of clean tail for its 35 dB fit, so `Δ` ≈ 2.5 s.
+
+At `Δ` = 2.5 s a mic position takes 10.0 s instead of 14.9 s (a third less; three positions
+in 30 s instead of 45). To build it:
+
+1. Play both channels in one stereo stream, so the offset is sample-exact: today a `Source`
+   plays one channel, so `AudioBackend` would take a source per channel (every platform).
+2. Split the analysis at the impulse response: `SweepAnalysis::analyze` on a recording
+   becomes deconvolve-then-analyse, with the second speaker's peak searched near `Δ`.
+3. Give `modes::find` a noise floor from a clean stretch, and stop each speaker's analysis
+   windows before the other speaker's distortion arrives (`Δ` − 1 s).
+4. The clipping check covers both speakers sounding together (up to 6 dB more at the mic).
+5. Keep one-after-the-other as a fallback where the clean stretch is too short (a room
+   ringing longer than about 1.5 s at its lowest wave).
 
 ## Done
 
