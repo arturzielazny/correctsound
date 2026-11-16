@@ -451,7 +451,7 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
           <h3>Level</h3>
           <p>Keep quiet for a few seconds while CorrectSound listens to your room. You see the background noise in the bass, the mids and the highs, live, and the level the measurement needs to stay 30 dB above it in every octave. Traffic and ventilation rumble in the bass, so that is usually what decides. A quiet room is measured at a comfortable 60 dB; a noisy one asks for up to 80, or for a quieter moment. Then press Enter: pink noise plays from one speaker and you turn the amplifier until the meter shows that level. Louder is fine, up to a comfortable 85 dB: the sweeps only gain margin. Above 95 dB it stops by itself.</p>
         </div>
-        <figure class="shot zoom"><img loading="lazy" src="img/4a-listening.png" alt="Listening to the room: background noise in bass, mids and highs, and a suggested measurement level of 68 dB SPL"></figure>
+        <figure class="shot zoom"><img loading="lazy" src="img/4a-listening.png" alt="Listening to the room: background noise in bass, mids and highs, and a suggested measurement level of 70 dB SPL"></figure>
       </div>
       <div class="step">
         <div class="text">
@@ -473,9 +473,9 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
         <div class="text">
           <div class="num">7</div>
           <h3>Save, apply, verify</h3>
-          <p><kbd>a</kbd> backs up your EasyEffects settings, installs the preset as <code>CoSo-001-DDMMYYYY</code>, loads it and makes it load automatically for that output. <kbd>v</kbd> plays the sweeps again, this time through EasyEffects, and compares the result with the prediction: the purple line should sit on the blue one.</p>
+          <p><kbd>a</kbd> backs up your EasyEffects settings, installs the preset as <code>CoSo-001-DDMMYYYY</code>, loads it and makes it load automatically for that output. <kbd>v</kbd> plays the sweeps again, this time through EasyEffects, and compares the result with the prediction: the purple line should sit on the blue one. If you measured several mic positions, put the mic back at the first one: the comparison is made for that spot.</p>
         </div>
-        <figure class="shot zoom"><img loading="lazy" src="img/7-saved-verified.png" alt="Save screen showing the preset loaded and the verification matching within 0.1 dB"></figure>
+        <figure class="shot zoom"><img loading="lazy" src="img/7-saved-verified.png" alt="Save screen showing the preset loaded and the verification matching the prediction within 0.2 dB"></figure>
       </div>
     </div>
   </div>
@@ -565,11 +565,11 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
         </div>
         <div>
           <figure class="shot zoom"><img loading="lazy" src="img/5b-placement.png" alt="Placement screen in sweeps mode: the bass at two speaker positions, and a waterfall of how the bass fades"></figure>
-          <figcaption>Sweeps mode, on the simulator. The simulated speakers were pinned 40 cm from the wall behind them (dashed): its reflection cancels a band around 170 Hz. Moved to 60 cm, the dip shrinks and the score improves by 1.1 dB. No equalizer can do that. The waterfall shows how the latest sweep's bass fades.</figcaption>
+          <figcaption>Sweeps mode, in the simulator's living room (5.64 × 5.24 m, like the room CorrectSound was first tried in). Pinned (grey) with the speakers 80 cm from the wall behind them: the reflection off that wall cancels a band around 85 Hz, 23 dB deep. Moved to 30 cm, the dip is gone and the bass is 2.9 dB more even. No equalizer can do that. The waterfall shows how the latest sweep's bass fades: the 32 and 45 Hz standing waves ring longest.</figcaption>
           <figure class="shot zoom" style="margin-top:22px"><img loading="lazy" src="img/5c-fastest.png" alt="Placement screen in fastest-sweeps mode: the bass from a short looping sweep, against the pinned sweep"></figure>
-          <figcaption>Fastest sweeps, same room: a third-of-a-second sweep in a loop, the curve updated ten times a second. In the simulator it matches the single sweep at the same position within 0.2 dB.</figcaption>
-          <figure class="shot zoom" style="margin-top:22px"><img loading="lazy" src="img/5d-fast.png" alt="Placement screen in fast-sweeps mode: a worse placement, and a big number saying it is less even than pinned"></figure>
-          <figcaption>Fast sweeps, with the speakers moved on to 90 cm: worse again, and the big number turns red.</figcaption>
+          <figcaption>Fastest sweeps, same room, speakers at 30 cm: a third-of-a-second sweep in a loop, the curve updated ten times a second. It reads the bass in 2.9 Hz steps, so in a room whose lowest notes ring this long it lands within about 1.5 dB of a full sweep at the same spot: plenty to tell placements apart, which differ by several dB.</figcaption>
+          <figure class="shot zoom" style="margin-top:22px"><img loading="lazy" src="img/5d-fast.png" alt="Placement screen in fast-sweeps mode: the speakers back at 80 cm, and a big number in red saying the bass is less even than at the pinned 30 cm"></figure>
+          <figcaption>Fast sweeps, with 30 cm pinned and the speakers moved back out to 80 cm: the 85 Hz dip returns and the big number turns red.</figcaption>
         </div>
       </div>
     </div>
@@ -577,12 +577,12 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
     <div id="ultrawide" style="scroll-margin-top:80px;margin-top:54px">
       <h3 style="margin:0">Made for wide screens</h3>
       <p>On an ultrawide monitor the charts use the whole width: the bass and the waterfall side by side, with room for every peak and dip. Charts are pixel images in Ghostty and kitty, and one image can span at most 297 columns of text, so on a terminal wider than that CorrectSound sends each chart in tiles that join seamlessly. Narrow terminals work too: the big number makes way for the text below 110 columns, and terminals without images get braille charts.</p>
-      <figure class="shot zoom" style="margin-top:18px"><img loading="lazy" src="img/5e-ultrawide.png" alt="Placement screen on a 320-column terminal: the bass against the pinned curve, the waterfall beside it, and a big number saying 1.2 dB more even than pinned"></figure>
-      <figcaption>Fast sweeps on a 320 × 62 terminal, the size of a 5120 × 2160 monitor, on the simulator: speakers moved from 40 to 60 cm from the wall, 1.2 dB more even than pinned.</figcaption>
+      <figure class="shot zoom" style="margin-top:18px"><img loading="lazy" src="img/5e-ultrawide.png" alt="Placement screen on a 320-column terminal: the bass against the pinned curve, the waterfall beside it, and a big number saying 2.9 dB more even than pinned"></figure>
+      <figcaption>Fast sweeps on a 320 × 62 terminal, the size of a 5120 × 2160 monitor, on the simulator: speakers moved from 80 to 30 cm from the wall, 2.9 dB more even than pinned.</figcaption>
     </div>
 
     <div class="two" style="margin-top:54px">
-      <figure class="shot zoom"><img loading="lazy" src="img/6c-decay.png" alt="Waterfall of the bass decay, with 97 Hz marked as ringing longest"></figure>
+      <figure class="shot zoom"><img loading="lazy" src="img/6c-decay.png" alt="Waterfall of the bass decay, with 32 Hz marked as ringing longest, and the room's lowest standing waves fading over 1.5 to 2 seconds"></figure>
       <div>
         <h3 style="margin-top:0">Decay waterfall <kbd>w</kbd></h3>
         <p>How each bass note fades after the sound stops. The back slice is the sound as it starts; each slice in front is 20 ms later. Most notes vanish within a few slices; a resonance stands out as a ridge that runs all the way to the front.</p>
@@ -612,7 +612,7 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
       </div>
       <div>
         <figure class="shot zoom"><img loading="lazy" src="img/6f-room.png" alt="Room screen: the room from above with the speakers and the seat, a standing wave's loud and silent places, the measured bass against the room model, and what it means"></figure>
-        <figcaption>On the simulator: the room guessed from the measurement, the 33 Hz standing wave shown, and the model's bass at the seat against the measurement.</figcaption>
+        <figcaption>On the simulator's living room, 5.64 × 5.24 m with the speakers in its right-hand corner: guessed from the measurement alone as 5.65 × 5.21 m, right-hand corner, the model within 1.1 dB of the measured bass. The plan shows the standing wave that rings longest, at 69 Hz, red and blue where it is loud.</figcaption>
         <figure class="shot zoom" style="margin-top:22px"><img loading="lazy" src="img/6g-room-seats.png" alt="Room screen in seat-map view: green where the bass would be even, red where it would be uneven"></figure>
         <figcaption>Where to sit (<kbd>v</kbd>): each spot coloured by how even the bass below 80 Hz would be if you sat there, with the speakers where they are. Green is even, red boomy or thin; the ring marks the most even seat within 60 cm.</figcaption>
       </div>
@@ -958,7 +958,7 @@ correctsound review          # open the newest again, re-analysed, nothing playe
 <footer>
   <div class="wrap">
     <p><b style="color:var(--fg)">CorrectSound</b> · <a href="https://github.com/arturzielazny/correctsound">GitHub</a> · <a href="https://github.com/arturzielazny/correctsound/discussions">Discussions</a> · <a href="https://github.com/arturzielazny/correctsound/blob/main/LICENSE">MIT licence</a> · <a href="https://github.com/arturzielazny/correctsound/blob/main/CONTRIBUTING.md">Contributing</a></p>
-    <p>Written by Claude (Anthropic), an AI coding agent, and tested by a human on real speakers. Screenshots come from the built-in simulator, generated by <code>cargo run --example screenshots</code>.</p>
+    <p>Written by Claude (Anthropic), an AI coding agent, and tested by a human on real speakers. Screenshots come from the built-in simulator, a living room of 5.64 × 5.24 m with the room's standing waves and wall reflections worked out from where the speakers and the mic are, generated by <code>cargo run --example screenshots</code>.</p>
   </div>
 </footer>
 

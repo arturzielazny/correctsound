@@ -115,7 +115,13 @@ impl App {
                         .into(),
                 );
             }
-            KeyCode::Char('v') if self.save.applied.is_some() => self.start_sweeps(Purpose::Verify),
+            KeyCode::Char('v') if self.save.applied.is_some() => {
+                // The simulated mic goes back to the first position, as the screen asks.
+                if let Some(state) = self.sim_state() {
+                    state.lock().expect("sim state lock poisoned").mic_position = 0;
+                }
+                self.start_sweeps(Purpose::Verify);
+            }
             KeyCode::Char('v') => {
                 let host = self.eq_host_name();
                 self.message = Some(if self.can_apply() {
@@ -173,11 +179,13 @@ impl App {
                 continue;
             };
             let ch = &design.channels[c];
+            let expected =
+                expected_at_first_position(&ch.predicted, self.measure.responses[c].as_ref());
             let diffs: Vec<(f64, f64)> = ch
                 .predicted
                 .freqs
                 .iter()
-                .zip(&ch.predicted.db)
+                .zip(&expected)
                 .zip(&v.fit.db)
                 .filter(|((f, _), _)| ch.target.in_range(**f))
                 .map(|((&f, p), m)| (f, m - p))
@@ -205,5 +213,30 @@ impl App {
     #[must_use]
     pub fn verify_responses(&self) -> &[Option<Responses>; 2] {
         &self.measure.verify
+    }
+}
+
+/// What verification should measure, dB per frequency of `predicted`: with several mic
+/// positions, the first position's own response with the EQ's effect added (the screen asks
+/// for the mic back there), since the prediction itself is their average and one spot
+/// differs from it by the room; with one position, the prediction.
+fn expected_at_first_position(
+    predicted: &crate::dsp::spectrum::Response,
+    measured: Option<&crate::analysis::Responses>,
+) -> Vec<f64> {
+    let first = measured.and_then(|r| r.positions.first().map(|p| (p, &r.fit)));
+    match first {
+        Some((first, average))
+            if first.freqs == predicted.freqs && average.freqs == predicted.freqs =>
+        {
+            predicted
+                .db
+                .iter()
+                .zip(&average.db)
+                .zip(&first.db)
+                .map(|((p, a), f)| f + (p - a))
+                .collect()
+        }
+        _ => predicted.db.clone(),
     }
 }

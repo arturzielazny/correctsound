@@ -68,7 +68,8 @@ fn simple_lines() -> Vec<Line<'static>> {
         p(
             "7 Save: writes the files, loads them into the EQ program as a preset (it also loads \
            automatically from then on), and can play the sweeps again through it to verify the \
-           result.",
+           result. With several mic positions, put the mic back at the first one first: the \
+           comparison is made for that spot, since one spot differs from their average.",
         ),
         gap(),
         h("Placement and room treatment (p on the measure step)"),

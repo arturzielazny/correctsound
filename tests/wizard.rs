@@ -297,7 +297,10 @@ fn full_wizard_on_simulator() {
     eprintln!("fastest at 1 m vs sweep at 1 m {same:.2} dB, vs sweep at 0.6 m {other:.2} dB");
     assert!(same < other / 2.0, "{same} vs {other}");
     // Moving the wall while the sweep loops: the dip follows within a few updates (0.1 s of
-    // sound each, while the app keeps up).
+    // sound each, while the app keeps up). "Follows" means as close to the sweep there as
+    // this mode gets anywhere: its 2.9 Hz steps read a room's narrowest resonances a little
+    // off.
+    let accuracy = same + 0.5;
     app.tick();
     for _ in 0..8 {
         press(&mut app, KeyCode::Left);
@@ -311,7 +314,7 @@ fn full_wizard_on_simulator() {
             a.placement
                 .as_ref()
                 .and_then(|p| p.latest.as_ref())
-                .is_some_and(|r| shape_difference(r, &pinned) < 1.0)
+                .is_some_and(|r| shape_difference(r, &pinned) < accuracy)
         },
     );
     let updates = count(&app) - moved_at;
@@ -517,10 +520,13 @@ fn full_wizard_on_simulator() {
 
     press(&mut app, KeyCode::Char('a'));
     assert!(app.save.applied.is_some(), "{:?}", app.save.error);
+    assert!(render(&app).contains("put the mic back where the first measurement was"));
     press(&mut app, KeyCode::Char('v'));
     tick_until(&mut app, "verification", Duration::from_secs(20), |a| {
         a.save.verify.is_some()
     });
+    // Verified at the first mic position (the screen asks for the mic there), against what
+    // the EQ predicts for that position: they match closely.
     let v = app.save.verify.expect("verified");
     assert!(
         v.iter().all(|r| r.rms_db < 0.5 && r.worst_db.abs() < 1.5),

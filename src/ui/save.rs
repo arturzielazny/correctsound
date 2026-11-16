@@ -55,6 +55,12 @@ pub(super) fn save(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Graph
                     p * 100.0
                 ))),
                 (Some(v), None) => verify_lines(v, host, &mut lines),
+                (None, None) if app.measure.positions[0].len() > 1 => {
+                    lines.push(Line::from(format!(
+                        "Press v to verify: put the mic back where the first measurement was, \
+                         then the sweeps play again, this time through {host}."
+                    )));
+                }
                 (None, None) => lines.push(Line::from(format!(
                     "Press v to verify: the sweeps play again, this time through {host}. Don't move the mic."
                 ))),

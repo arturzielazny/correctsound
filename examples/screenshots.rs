@@ -81,15 +81,8 @@ fn main() {
     tick_until(&mut app, |a| {
         a.placement.as_ref().is_some_and(|p| p.count >= 1)
     });
-    // Too close to the wall: pin it, then move back out.
-    for _ in 0..4 {
-        press(&mut app, KeyCode::Left);
-    }
-    let seen = app.placement.as_ref().map_or(0, |p| p.count);
-    tick_until(&mut app, |a| {
-        a.placement.as_ref().is_some_and(|p| p.count >= seen + 2)
-    });
-    press(&mut app, KeyCode::Char(' '));
+    // In the simulated living room the speakers stand about 80 cm from the wall behind
+    // them, where the left one's bass is least even: pin that, then move them to 30 cm.
     for _ in 0..4 {
         press(&mut app, KeyCode::Right);
     }
@@ -97,10 +90,18 @@ fn main() {
     tick_until(&mut app, |a| {
         a.placement.as_ref().is_some_and(|p| p.count >= seen + 2)
     });
+    press(&mut app, KeyCode::Char(' '));
+    for _ in 0..10 {
+        press(&mut app, KeyCode::Left);
+    }
+    let seen = app.placement.as_ref().map_or(0, |p| p.count);
+    tick_until(&mut app, |a| {
+        a.placement.as_ref().is_some_and(|p| p.count >= seen + 2)
+    });
     app.message = None;
     shots.take(&app, "5b-placement");
-    // Fast sweeps: a sweep looping without pauses, on an ultrawide monitor too; then a worse
-    // placement, so the big number turns red.
+    // Fast sweeps: a sweep looping without pauses, on an ultrawide monitor too; then the
+    // good placement pinned and the speakers moved back out, so the big number turns red.
     press(&mut app, KeyCode::Char('m'));
     let seen = app.placement.as_ref().map_or(0, |p| p.count);
     tick_until(&mut app, |a| {
@@ -108,7 +109,8 @@ fn main() {
     });
     app.message = None;
     shots.take_sized(&app, "5e-ultrawide", WIDE);
-    for _ in 0..6 {
+    press(&mut app, KeyCode::Char(' '));
+    for _ in 0..10 {
         press(&mut app, KeyCode::Right);
     }
     let seen = app.placement.as_ref().map_or(0, |p| p.count);
@@ -117,7 +119,7 @@ fn main() {
     });
     app.message = None;
     shots.take(&app, "5d-fast");
-    for _ in 0..6 {
+    for _ in 0..10 {
         press(&mut app, KeyCode::Left);
     }
     // Fastest sweeps: the same comparison, from a short sweep looping, ten times a second.

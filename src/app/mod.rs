@@ -48,7 +48,8 @@ pub struct Options {
     pub sink: Option<String>,
     /// Open this saved session for review instead of measuring.
     pub review: Option<PathBuf>,
-    /// The simulated room and speakers, when simulating ([`SimConfig::default`] if not set).
+    /// The simulated room and speakers, when simulating ([`SimConfig::living_room`] if not
+    /// set).
     pub sim_config: Option<SimConfig>,
     /// The simulated devices as they start (which outputs, whether the mic is plugged in).
     pub sim_state: Option<SimState>,
@@ -228,7 +229,10 @@ impl App {
             let state = Arc::new(Mutex::new(options.sim_state.clone().unwrap_or_default()));
             let config = SimConfig {
                 speed: 4.0,
-                ..options.sim_config.clone().unwrap_or_default()
+                ..options
+                    .sim_config
+                    .clone()
+                    .unwrap_or_else(SimConfig::living_room)
             };
             (
                 Env::Sim {

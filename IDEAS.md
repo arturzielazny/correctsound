@@ -94,6 +94,10 @@ is that every port adds a module under `src/platform/` and leaves the rest alone
   as a second clue to where the speakers are, independent of the mic position.
 - Fit the dimensions themselves (not only candidates from the resonances) and the speakers'
   acoustic centres, which sit a little in front of where a tape measure ends.
+- Close pairs of standing waves read as ringing too long: in the simulated living room the
+  waves at 69.0 and 72.2 Hz, both set to ring 0.5 s, measure about 2.2 s, as their beating
+  slows the decay curve. Fit two decays (or the pair's envelope) where two waves lie within
+  their own bandwidths of each other. The real room's 62/69 Hz readings may be the same.
 - Fold the room model into the EQ: the 0.5 s analysis window understates a mode that rings
   1.7 s by 2–3 dB (measured on the simulator), which the model can correct.
 
