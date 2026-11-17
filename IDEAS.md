@@ -192,6 +192,16 @@ in 30 s instead of 45). To build it:
   lower crest factor than noise, so more signal at the same peak level. The most even
   curve so far (faded green) is gone: it cluttered the chart; the pinned curve is drawn
   solid and dimmer, behind the latest.
+- **Instant on large screens**: on a 5K monitor a change on the result screen sent 48 MB
+  of uncompressed chart pixels to the terminal; charts are now compressed (about 1 MB) and
+  encoded in parallel bands. The EQ fit placed its filters once per count (16 times over);
+  it now places them once and refines each count, in parallel with the cross-validation
+  folds (650 → 120–160 ms, the same filters to the bit), and runs in the background, a run
+  of keys designed once. The room is guessed in the background from the result screen on;
+  the "where to sit" map sorted the whole map for every pixel. Keys waiting in the
+  terminal are all taken before the next frame, a screen under an overlay is not drawn,
+  and a review analyses its recordings in parallel (1.7 → 0.3 s). `tests/performance.rs`
+  keeps it so. Next: draw a screen's charts in parallel (a placement frame is two of them).
 - **A richer simulator**: `SimConfig::living_room` puts the speakers in a room of known
   size; the bass comes from the room model's standing waves (one band-pass filter each, so
   they ring as long as the model says) and the treble from the direct sound and the six

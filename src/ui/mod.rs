@@ -37,6 +37,13 @@ pub fn draw(frame: &mut Frame<'_>, app: &App, gfx: &mut Graphics) {
     ])
     .areas(frame.area());
     draw_header(frame, header, app);
+    // An open overlay covers the whole body: the step under it is not drawn (its charts
+    // would be worked out and sent for nothing).
+    if let Some(overlay) = app.overlay {
+        draw_overlay(frame, body, app, overlay, gfx);
+        draw_footer(frame, footer, app);
+        return;
+    }
     match app.step {
         Step::Preflight => devices::preflight(frame, body, app),
         Step::Calibration => calibration::calibration(frame, body, app),
@@ -45,9 +52,6 @@ pub fn draw(frame: &mut Frame<'_>, app: &App, gfx: &mut Graphics) {
         Step::Measure => measure::measure(frame, body, app, gfx),
         Step::Result => result::result(frame, body, app, gfx),
         Step::Save => save::save(frame, body, app, gfx),
-    }
-    if let Some(overlay) = app.overlay {
-        draw_overlay(frame, body, app, overlay, gfx);
     }
     draw_footer(frame, footer, app);
 }

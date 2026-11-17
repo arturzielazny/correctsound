@@ -344,8 +344,9 @@ impl Model {
                 .unwrap_or(0)
         };
         let cz = cos_table(max_order(2), r.height, setup.seat.z);
-        let mut values = Vec::with_capacity(nx * ny);
-        for iy in 0..ny {
+        // Each row of seats on its own thread, joined back in order.
+        let row = |iy: usize| {
+            let mut values = Vec::with_capacity(nx);
             let y = (iy as f64 + 0.5) * step;
             let cy = cos_table(max_order(1), r.width, y);
             for ix in 0..nx {
@@ -374,7 +375,15 @@ impl Model {
                     .collect();
                 values.push(unevenness_db(&freqs, &db));
             }
-        }
+            values
+        };
+        let values: Vec<f64> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..ny).map(|iy| scope.spawn(move || row(iy))).collect();
+            handles
+                .into_iter()
+                .flat_map(|h| h.join().expect("seat map threads do not panic"))
+                .collect()
+        });
         SeatMap {
             nx,
             ny,
@@ -865,10 +874,22 @@ pub fn guess(
     modes: &[Mode],
     typical_t60_s: f64,
 ) -> Vec<Guess> {
-    let mut found: Vec<Guess> = guess_rooms(heard, CANDIDATE_ROOMS)
-        .into_iter()
-        .filter_map(|room| guess_setup(room, evidence, &Model::new(room, modes, typical_t60_s)))
-        .collect();
+    // Each candidate room's layout search is independent: all at once.
+    let rooms = guess_rooms(heard, CANDIDATE_ROOMS);
+    let mut found: Vec<Guess> = std::thread::scope(|scope| {
+        let handles: Vec<_> = rooms
+            .into_iter()
+            .map(|room| {
+                scope.spawn(move || {
+                    guess_setup(room, evidence, &Model::new(room, modes, typical_t60_s))
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .filter_map(|h| h.join().expect("guess threads do not panic"))
+            .collect()
+    });
     found.sort_by(|a, b| a.score().total_cmp(&b.score()));
     found
 }
@@ -883,7 +904,6 @@ const CANDIDATE_ROOMS: usize = 8;
 /// wave between the side walls).
 #[must_use]
 pub fn guess_setup(room: Room, evidence: Evidence<'_>, model: &Model) -> Option<Guess> {
-    let mut best: Option<Guess> = None;
     let eval = Evaluator::new(model, &agreement_grid());
     let at_modes = Evaluator::new(
         model,
@@ -904,6 +924,7 @@ pub fn guess_setup(room: Room, evidence: Evidence<'_>, model: &Model) -> Option<
             .then(|| balance_error_with(&at_modes, setup, evidence.balance)),
     };
     let consider = |x: f64, mid: f64, spacing: f64, best: &mut Option<Guess>| {
+        // (The first of equally good layouts wins, as scanning them in order would.)
         let seat_x = x + spacing * 3f64.sqrt() / 2.0;
         if mid - spacing / 2.0 < 0.15
             || mid + spacing / 2.0 > room.width - 0.15
@@ -941,26 +962,59 @@ pub fn guess_setup(room: Room, evidence: Evidence<'_>, model: &Model) -> Option<
         let n = ((to - from) / step).floor().max(0.0) as usize;
         (0..=n).map(move |i| from + i as f64 * step)
     };
-    for x in steps(0.2, (room.length / 2.0).min(2.0), 0.2) {
-        for mid in steps(0.6, room.width - 0.6, 0.2) {
-            for spacing in [1.0, 1.4, 1.8] {
-                consider(x, mid, spacing, &mut best);
+    // Every distance from the wall on its own thread; the best of each, in order, so the
+    // result is the one a scan in that order finds.
+    let in_parallel = |rows: Vec<f64>, per_row: &(dyn Fn(f64, &mut Option<Guess>) + Sync)| {
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = rows
+                .into_iter()
+                .map(|x| {
+                    scope.spawn(move || {
+                        let mut best = None;
+                        per_row(x, &mut best);
+                        best
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .filter_map(|h| h.join().expect("guess threads do not panic"))
+                .fold(None, |best: Option<Guess>, g| {
+                    if best.as_ref().is_none_or(|b| g.score() < b.score()) {
+                        Some(g)
+                    } else {
+                        best
+                    }
+                })
+        })
+    };
+    let best = in_parallel(
+        steps(0.2, (room.length / 2.0).min(2.0), 0.2).collect(),
+        &|x, best| {
+            for mid in steps(0.6, room.width - 0.6, 0.2) {
+                for spacing in [1.0, 1.4, 1.8] {
+                    consider(x, mid, spacing, best);
+                }
             }
-        }
-    }
+        },
+    );
     let coarse = best?.setup;
     let (x0, mid0) = (coarse.speakers[0].x, coarse.seat.y);
     let spacing0 = coarse.speakers[1].y - coarse.speakers[0].y;
-    for x in steps(x0 - 0.15, x0 + 0.15, 0.05) {
+    let fine = in_parallel(steps(x0 - 0.15, x0 + 0.15, 0.05).collect(), &|x, best| {
         for mid in steps(mid0 - 0.15, mid0 + 0.15, 0.05) {
             for spacing in steps(spacing0 - 0.2, spacing0 + 0.2, 0.1) {
                 if x > 0.1 && spacing > 0.6 {
-                    consider(x, mid, spacing, &mut best);
+                    consider(x, mid, spacing, best);
                 }
             }
         }
+    });
+    // A finer layout replaces the coarse one only when it is better.
+    match (best, fine) {
+        (Some(b), Some(f)) if f.score() < b.score() => Some(f),
+        (b, _) => b,
     }
-    best
 }
 
 #[cfg(test)]

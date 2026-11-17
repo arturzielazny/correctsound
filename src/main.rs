@@ -202,11 +202,16 @@ fn wizard(options: Options) -> Result<()> {
             gfx.refresh_cell_size();
             gfx.begin_frame();
             terminal.draw(|f| correctsound::ui::draw(f, &app, &mut gfx))?;
-            if event::poll(Duration::from_millis(50))?
-                && let Event::Key(key) = event::read()?
-                && key.kind == KeyEventKind::Press
-            {
-                app.handle_key(key);
+            // Every key already waiting is handled before the next frame: a quick run of
+            // presses is drawn once, at the end, instead of one frame behind the other.
+            let mut wait = Duration::from_millis(50);
+            while !app.quit && event::poll(wait)? {
+                if let Event::Key(key) = event::read()?
+                    && key.kind == KeyEventKind::Press
+                {
+                    app.handle_key(key);
+                }
+                wait = Duration::ZERO;
             }
             app.tick();
         }

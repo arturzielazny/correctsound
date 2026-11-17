@@ -11,8 +11,9 @@ use ab_glyph::FontVec;
 use ratatui::Frame;
 use ratatui::layout::{Rect, Size};
 use ratatui_image::picker::cap_parser::QueryStdioOptions;
-use ratatui_image::picker::{Picker, ProtocolType};
+use ratatui_image::picker::{Capability, Picker, ProtocolType};
 use ratatui_image::protocol::Protocol;
+use ratatui_image::protocol::kitty::Kitty;
 use ratatui_image::{Image, Resize};
 
 use super::raster::{self, Canvas};
@@ -25,6 +26,9 @@ const QUERY_TIMEOUT: Duration = Duration::from_millis(500);
 /// Ghostty and kitty show images in a text UI) number columns and rows up to 297; a chart
 /// wider than that, on an ultrawide monitor, is sent as tiles side by side.
 const MAX_TILE_CELLS: u16 = 256;
+/// Tallest tile, in rows: a chart is also cut into bands this tall, so its tiles are
+/// encoded and compressed on several threads at once.
+const BAND_ROWS: u16 = 16;
 
 /// Image support and the charts already sent to the terminal.
 pub struct Graphics {
@@ -36,6 +40,12 @@ pub struct Graphics {
     cache: HashMap<String, (u64, Vec<(Rect, Protocol)>)>,
     /// Chart slots drawn since [`Self::begin_frame`].
     drawn: HashSet<String>,
+    /// True when the terminal takes kitty images compressed: a chart is then a few hundred
+    /// kilobytes instead of tens of megabytes of pixels on a large screen. Kept here, as the
+    /// picker is replaced when the font size changes.
+    compress: bool,
+    /// The kitty image id the next image gets.
+    next_id: u32,
     /// Cell size in pixels when charts are kept as images instead of sent to a terminal.
     offscreen: Option<(u16, u16)>,
     /// Charts drawn offscreen since [`Self::take_captured`]: where, and the image.
@@ -61,6 +71,8 @@ impl Graphics {
             font: None,
             cache: HashMap::new(),
             drawn: HashSet::new(),
+            compress: false,
+            next_id: first_image_id(),
             offscreen: None,
             captured: Vec::new(),
         }
@@ -76,7 +88,32 @@ impl Graphics {
             font,
             cache: HashMap::new(),
             drawn: HashSet::new(),
+            compress: false,
+            next_id: first_image_id(),
             offscreen: Some(cell),
+            captured: Vec::new(),
+        }
+    }
+
+    /// Charts sent as `protocol` images for cells `cell` pixels large, without asking a
+    /// terminal: for measuring how long drawing takes, as it would in Ghostty or kitty.
+    #[must_use]
+    pub fn with_protocol(protocol: ProtocolType, cell: (u16, u16), compress: bool) -> Self {
+        #[expect(
+            deprecated,
+            reason = "the cell size is given, not queried from a terminal"
+        )]
+        let mut picker = Picker::from_fontsize(cell.into());
+        picker.set_protocol_type(protocol);
+        Self {
+            picker: Some(picker),
+            theme: Theme::parse(""),
+            font: raster::load_font(),
+            cache: HashMap::new(),
+            drawn: HashSet::new(),
+            compress,
+            next_id: first_image_id(),
+            offscreen: None,
             captured: Vec::new(),
         }
     }
@@ -93,6 +130,7 @@ impl Graphics {
         let asked = Instant::now();
         let options = QueryStdioOptions {
             timeout: QUERY_TIMEOUT,
+            kitty_compression: true,
             ..QueryStdioOptions::default()
         };
         let picker = Picker::from_query_stdio_with_options(options).ok();
@@ -107,12 +145,17 @@ impl Graphics {
         // Half-block "images" are coarser than the braille charts.
         let picker = picker.filter(|p| p.protocol_type() != ProtocolType::Halfblocks);
         let font = picker.as_ref().and_then(|_| raster::load_font());
+        let compress = picker
+            .as_ref()
+            .is_some_and(|p| p.capabilities().contains(&Capability::KittyCompression));
         Self {
             picker,
             theme: Theme::load(),
             font,
             cache: HashMap::new(),
             drawn: HashSet::new(),
+            compress,
+            next_id: first_image_id(),
             offscreen: None,
             captured: Vec::new(),
         }
@@ -202,20 +245,42 @@ impl Graphics {
             );
             render(&mut canvas, &self.theme, self.font.as_ref());
             let image = canvas.into_image();
-            let parts: Option<Vec<(Rect, Protocol)>> = tiles(area.width, area.height)
-                .into_iter()
-                .map(|t| {
-                    let part = image.crop_imm(
-                        u32::from(t.x) * u32::from(cell.width),
-                        u32::from(t.y) * u32::from(cell.height),
-                        u32::from(t.width) * u32::from(cell.width),
-                        u32::from(t.height) * u32::from(cell.height),
-                    );
-                    let size = Size::new(t.width, t.height);
-                    let p = picker.new_protocol(part, size, Resize::Fit(None)).ok()?;
-                    Some((t, p))
-                })
-                .collect();
+            let tiles = tiles(area.width, area.height);
+            let first_id = self.next_id;
+            self.next_id = self.next_id.wrapping_add(tiles.len() as u32).max(1);
+            let (compress, tmux) = (self.compress, picker.tmux_detected());
+            // Each tile is encoded (and compressed) on its own thread.
+            let parts: Option<Vec<(Rect, Protocol)>> = std::thread::scope(|scope| {
+                let handles: Vec<_> = tiles
+                    .into_iter()
+                    .enumerate()
+                    .map(|(k, t)| {
+                        let part = image.crop_imm(
+                            u32::from(t.x) * u32::from(cell.width),
+                            u32::from(t.y) * u32::from(cell.height),
+                            u32::from(t.width) * u32::from(cell.width),
+                            u32::from(t.height) * u32::from(cell.height),
+                        );
+                        let id = first_id.wrapping_add(k as u32).max(1);
+                        scope.spawn(move || {
+                            let size = Size::new(t.width, t.height);
+                            let protocol = match picker.protocol_type() {
+                                // Built here rather than by the picker, which only compresses
+                                // when it asked the terminal itself.
+                                ProtocolType::Kitty => {
+                                    Kitty::new(part, size, id, tmux, compress).map(Protocol::Kitty)
+                                }
+                                _ => picker.new_protocol(part, size, Resize::Fit(None)),
+                            };
+                            protocol.ok().map(|p| (t, p))
+                        })
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|h| h.join().expect("image threads do not panic"))
+                    .collect()
+            });
             match parts {
                 Some(t) => {
                     self.cache.insert(slot.to_owned(), (key, t));
@@ -234,11 +299,20 @@ impl Graphics {
     }
 }
 
-/// An area of `width` × `height` cells cut into tiles no larger than [`MAX_TILE_CELLS`],
-/// as offsets from its corner; one tile when it fits.
+/// A kitty image id to start from: different on every run, so images left in the terminal
+/// by an earlier run are not mistaken for this run's.
+fn first_image_id() -> u32 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.subsec_nanos());
+    (nanos ^ std::process::id().rotate_left(16)).max(1)
+}
+
+/// An area of `width` × `height` cells cut into tiles no wider than [`MAX_TILE_CELLS`] and
+/// no taller than [`BAND_ROWS`], as offsets from its corner.
 fn tiles(width: u16, height: u16) -> Vec<Rect> {
-    let cuts = |len: u16| {
-        let n = len.div_ceil(MAX_TILE_CELLS).max(1);
+    let cuts = |len: u16, most: u16| {
+        let n = len.div_ceil(most).max(1);
         // Equal tiles, the remainder spread over the first ones.
         (0..n).scan(0, move |at, i| {
             let size = len / n + u16::from(i < len % n);
@@ -247,8 +321,8 @@ fn tiles(width: u16, height: u16) -> Vec<Rect> {
             Some((start, size))
         })
     };
-    cuts(height)
-        .flat_map(|(y, h)| cuts(width).map(move |(x, w)| Rect::new(x, y, w, h)))
+    cuts(height, BAND_ROWS)
+        .flat_map(|(y, h)| cuts(width, MAX_TILE_CELLS).map(move |(x, w)| Rect::new(x, y, w, h)))
         .collect()
 }
 
@@ -258,17 +332,26 @@ mod tests {
 
     #[test]
     fn a_wide_chart_is_cut_into_tiles_that_cover_it() {
-        assert_eq!(tiles(120, 40), vec![Rect::new(0, 0, 120, 40)]);
+        assert_eq!(tiles(120, 12), vec![Rect::new(0, 0, 120, 12)]);
+        // Taller: bands of equal height, a row more in the first ones.
+        assert_eq!(
+            tiles(120, 40),
+            vec![
+                Rect::new(0, 0, 120, 14),
+                Rect::new(0, 14, 120, 13),
+                Rect::new(0, 27, 120, 13)
+            ]
+        );
         // An ultrawide terminal, 365 columns: two tiles side by side, no gap.
-        let t = tiles(365, 60);
+        let t = tiles(365, 16);
         assert_eq!(
             t,
-            vec![Rect::new(0, 0, 183, 60), Rect::new(183, 0, 182, 60)]
+            vec![Rect::new(0, 0, 183, 16), Rect::new(183, 0, 182, 16)]
         );
         let t = tiles(600, 300);
         assert!(
             t.iter()
-                .all(|r| r.width <= MAX_TILE_CELLS && r.height <= MAX_TILE_CELLS)
+                .all(|r| r.width <= MAX_TILE_CELLS && r.height <= BAND_ROWS)
         );
         let area: u32 = t
             .iter()

@@ -128,5 +128,13 @@ move the mic between positions and put the speakers in a room of known size
 (`SimConfig::living_room`, `SimState`). If a screen changed, regenerate the website's
 screenshots: `cargo run --release --example screenshots -- docs/img` (needs fontconfig).
 
+The app must answer at once. `tests/performance.rs` reviews a simulated measurement on a
+5K-monitor-sized terminal and fails when a key waits for heavy work, a frame sends
+uncompressed images, a run of keys is worked out once per key, or drawing slows down (its
+drawing budgets are measured against a yardstick on the machine running it). Heavy work
+(designing the EQ, guessing the room) runs in the background or once per frame, never on
+the key; work that repeats per pixel or per cell stays out of loops. Run it with
+`-- --nocapture` to see the times.
+
 Code style: each file starts with a comment saying what it is for; messages to the user
 are plain sentences; errors in user input are reported, never `panic!`ed.

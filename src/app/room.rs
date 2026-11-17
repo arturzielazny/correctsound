@@ -354,6 +354,19 @@ impl RoomState {
         }
     }
 
+    /// True when the guesses are those of a measurement with `measurements` sweeps.
+    #[must_use]
+    pub fn guessed_for(&self, measurements: usize) -> bool {
+        self.guessed_from == measurements && !self.guesses.is_empty()
+    }
+
+    /// Takes guesses worked out elsewhere (in the background) for a measurement with
+    /// `measurements` sweeps.
+    pub fn set_guesses(&mut self, measurements: usize, guesses: Vec<Guess>) {
+        self.guesses = guesses;
+        self.guessed_from = measurements;
+    }
+
     /// The room shown.
     #[must_use]
     pub fn setup(&self) -> Option<Setup> {
@@ -767,8 +780,64 @@ impl App {
         })
     }
 
+    /// Starts guessing the room in the background as soon as there is a measurement, so the
+    /// room screen opens at once: guessing tries hundreds of layouts in each candidate room.
+    pub(super) fn start_room_guess(&mut self) {
+        if self.room_job.is_some() {
+            return;
+        }
+        let typical = self.room_reverb_s();
+        let Some(m) = Self::room_measured(&self.measure, typical) else {
+            return;
+        };
+        let measurements = m.per_measurement.len();
+        if self.room.guessed_for(measurements) {
+            return;
+        }
+        let heard = roommodel::heard_resonances(&m.per_measurement);
+        let responses = [
+            m.responses[0].display.clone(),
+            m.responses[1].display.clone(),
+        ];
+        let (balance, merged) = (m.balance.clone(), m.merged.clone());
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let evidence = Evidence {
+                responses: [&responses[0], &responses[1]],
+                balance: &balance,
+            };
+            let guesses = roommodel::guess(&heard, evidence, &merged, typical);
+            let _ = tx.send((measurements, guesses));
+        });
+        self.room_job = Some(rx);
+    }
+
+    /// Takes the background guesses when they are ready (waiting for them with `wait`), and
+    /// works out what the room screen shows first, so it opens without delay.
+    pub(super) fn collect_room_guess(&mut self, wait: bool) {
+        let Some(job) = &self.room_job else { return };
+        let got = if wait {
+            job.recv().ok()
+        } else {
+            match job.try_recv() {
+                Ok(g) => Some(g),
+                Err(std::sync::mpsc::TryRecvError::Empty) => return,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => None,
+            }
+        };
+        self.room_job = None;
+        if let Some((measurements, guesses)) = got {
+            self.room.set_guesses(measurements, guesses);
+            self.refresh_room();
+        }
+    }
+
     /// Brings the room screen up to date with the measurement and the setup.
     pub(super) fn refresh_room(&mut self) {
+        if self.room_job.is_some() {
+            self.collect_room_guess(true);
+            return;
+        }
         let typical = self.room_reverb_s();
         if let Some(m) = Self::room_measured(&self.measure, typical) {
             self.room.guess(&m);
@@ -867,6 +936,15 @@ impl App {
         }
         if self.room.take_changed() {
             self.save_rooms();
+        }
+        // Worked out once before the next frame, however many keys arrive meanwhile.
+        self.room_stale = true;
+    }
+
+    /// Brings the room screen up to date when keys changed it: once per frame.
+    pub(super) fn settle_room(&mut self) {
+        if !std::mem::take(&mut self.room_stale) {
+            return;
         }
         self.refresh_room();
         let listed = self.room.current().map_or(0, |d| d.listed.len());

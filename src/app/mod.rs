@@ -201,6 +201,14 @@ pub struct App {
 
     pub design_options: DesignOptions,
     pub design: Option<Design>,
+    /// A design being worked out in the background after a key changed the options.
+    design_job: Option<Receiver<Design>>,
+    /// Designs worked out so far (in the background or not).
+    pub designs_run: usize,
+    /// The room guessed in the background: the measurement's sweep count and the guesses.
+    room_job: Option<Receiver<(usize, Vec<crate::dsp::roommodel::Guess>)>>,
+    /// True when keys changed the room screen since it was last worked out.
+    room_stale: bool,
     pub view_channel: usize,
 
     pub save: SaveState,
@@ -291,6 +299,10 @@ impl App {
             placement: None,
             design_options: DesignOptions::default(),
             design: None,
+            design_job: None,
+            designs_run: 0,
+            room_job: None,
+            room_stale: false,
             view_channel: 0,
             save: SaveState::default(),
             session: None,
@@ -340,18 +352,40 @@ impl App {
             offset_db: info.spl_offset_db,
         };
         let sweep = crate::dsp::sweep::Sweep::new(crate::dsp::sweep::SweepParams::default());
-        for c in Channel::BOTH {
-            let mut runs = Vec::new();
-            for p in 0..info.positions[c.index()] {
-                let rec = crate::session::read_wav(&session.capture_path(c, p))?;
-                let analysis = crate::dsp::sweep::SweepAnalysis::analyze(
-                    &sweep,
-                    &rec,
-                    crate::dsp::sweep::IrWindow::default(),
-                )
-                .map_err(|e| anyhow!("{} position {}: {e}", c.name(), p + 1))?;
-                runs.push(analysis);
-            }
+        // Every recording is analysed on its own thread, then taken in order.
+        let analysed: Vec<Vec<Result<crate::dsp::sweep::SweepAnalysis>>> =
+            std::thread::scope(|scope| {
+                let handles: Vec<Vec<_>> = Channel::BOTH
+                    .iter()
+                    .map(|&c| {
+                        (0..info.positions[c.index()])
+                            .map(|p| {
+                                let (sweep, session) = (&sweep, &session);
+                                scope.spawn(move || {
+                                    let rec =
+                                        crate::session::read_wav(&session.capture_path(c, p))?;
+                                    crate::dsp::sweep::SweepAnalysis::analyze(
+                                        sweep,
+                                        &rec,
+                                        crate::dsp::sweep::IrWindow::default(),
+                                    )
+                                    .map_err(|e| anyhow!("{} position {}: {e}", c.name(), p + 1))
+                                })
+                            })
+                            .collect()
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|runs| {
+                        runs.into_iter()
+                            .map(|h| h.join().expect("analysis threads do not panic"))
+                            .collect()
+                    })
+                    .collect()
+            });
+        for (c, results) in Channel::BOTH.into_iter().zip(analysed) {
+            let runs = results.into_iter().collect::<Result<Vec<_>>>()?;
             self.measure.responses[c.index()] = Some(crate::analysis::responses(
                 &runs,
                 &cal,
@@ -374,6 +408,7 @@ impl App {
         self.session = Some(session);
         self.step = Step::Result;
         self.redesign();
+        self.start_room_guess();
         Ok(())
     }
 
@@ -466,7 +501,10 @@ impl App {
                     self.set_error(&e);
                 }
             }
-            Step::Result => self.redesign(),
+            Step::Result => {
+                self.redesign();
+                self.start_room_guess();
+            }
             Step::Save => self.write_outputs(),
             _ => {}
         }
@@ -608,6 +646,9 @@ impl App {
 
     /// Advances background work: device polling, downloads, audio streams.
     pub fn tick(&mut self) {
+        self.poll_design();
+        self.collect_room_guess(false);
+        self.settle_room();
         match self.step {
             Step::Preflight => {
                 let due = self
@@ -658,6 +699,13 @@ impl App {
             .collect();
         all.sort_by(f64::total_cmp);
         all.get(all.len() / 2).copied()
+    }
+
+    /// True while work runs in the background (a design, the room guess); the screen keeps
+    /// answering keys meanwhile.
+    #[must_use]
+    pub fn working(&self) -> bool {
+        self.designing() || self.room_job.is_some()
     }
 
     /// The simulator's state, when simulating: tests plug the mic in, add outputs or move

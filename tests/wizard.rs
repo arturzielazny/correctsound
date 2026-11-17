@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use correctsound::app::placement::{Mode, Reading};
 use correctsound::app::{App, LevelPhase, Options, Overlay, Step, room};
 use correctsound::eq::fit::AutoMethod;
+use correctsound::eq::target::HIGH_LIMIT_PRESETS;
 use correctsound::ui::graphics::Graphics;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Terminal;
@@ -25,6 +26,13 @@ fn tick_until(app: &mut App, what: &str, timeout: Duration, done: impl Fn(&App) 
         app.tick();
         std::thread::sleep(Duration::from_millis(10));
     }
+}
+
+/// Lets background work (a design, the room guess) finish, as the event loop would.
+fn settle(app: &mut App) {
+    tick_until(app, "background work", Duration::from_secs(20), |a| {
+        !a.working()
+    });
 }
 
 /// How differently two bass readings are shaped from 40 to 250 Hz: the RMS of their
@@ -378,7 +386,21 @@ fn full_wizard_on_simulator() {
         design.channels[0].auto.as_ref().map(|a| a.method),
         Some(AutoMethod::CrossValidated { positions: 2 })
     );
+    // A key changes the options at once and the design follows in the background: the
+    // screen keeps answering keys. A quick run of presses is designed once at the end, not
+    // once per press.
+    let runs = app.designs_run;
     press(&mut app, KeyCode::Char('h'));
+    assert!(app.designing());
+    for _ in 0..HIGH_LIMIT_PRESETS.len() {
+        press(&mut app, KeyCode::Char('h'));
+    }
+    settle(&mut app);
+    assert!(
+        app.designs_run - runs <= 2,
+        "{} designs for a run of presses",
+        app.designs_run - runs
+    );
     assert_eq!(
         app.design.as_ref().expect("designed").options.high_limit_hz,
         Some(300.0)
@@ -394,6 +416,7 @@ fn full_wizard_on_simulator() {
         .max()
         .expect("two");
     press(&mut app, KeyCode::Char('F'));
+    settle(&mut app);
     assert_eq!(
         app.design.as_ref().expect("designed").options.max_filters,
         Some(most - 1)
@@ -479,6 +502,7 @@ fn full_wizard_on_simulator() {
     );
     assert!((after - before - 0.05).abs() < 0.011, "{before} → {after}");
     // Every standing wave can be shown, and where to sit instead.
+    app.tick(); // the room screen is worked out once per frame
     let derived = app.room.current().expect("the model's view");
     assert!(!derived.listed.is_empty());
     assert!(derived.agreement_db.iter().all(Option::is_some));

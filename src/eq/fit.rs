@@ -200,11 +200,26 @@ pub struct AutoChoice {
     pub error_by_count: Vec<(usize, f64)>,
 }
 
-/// Fits all counts 1..=[`AUTO_MAX_FILTERS`] in parallel; index 0 is no filters.
+/// Fits all counts 1..=[`AUTO_MAX_FILTERS`]; index 0 is no filters.
+///
+/// The filters are placed one at a time, and placing the first `n` does not depend on how
+/// many come after, so one run of [`seeds`] gives every count its starting point; only the
+/// final refinement differs, and those run in parallel. The result is exactly what fitting
+/// each count on its own gives, at a sixth of the work.
 fn fit_all(p: &Problem<'_>) -> Vec<Vec<Filter>> {
+    let seeded = seeds(p, AUTO_MAX_FILTERS);
     let mut fits: Vec<Vec<Filter>> = std::thread::scope(|scope| {
         let handles: Vec<_> = (1..=AUTO_MAX_FILTERS)
-            .map(|n| scope.spawn(move || fit_problem(p, n)))
+            .map(|n| {
+                // Placing stops early when nothing is left worth correcting: every larger
+                // count starts from the last placement.
+                let start = seeded
+                    .get(n - 1)
+                    .or_else(|| seeded.last())
+                    .cloned()
+                    .unwrap_or_default();
+                scope.spawn(move || finish(p, start))
+            })
             .collect();
         handles
             .into_iter()
@@ -249,7 +264,39 @@ pub fn fit_auto(
     positions: &[Response],
 ) -> (Vec<Filter>, AutoChoice) {
     let p = problem(measured, target);
-    let mut fits = fit_all(&p);
+    // The fit itself and every cross-validation fold are independent: all at once.
+    let folds = if positions.len() >= 2 {
+        positions.len()
+    } else {
+        0
+    };
+    let (mut fits, fold_errors): (Vec<Vec<Filter>>, Vec<Vec<f64>>) = std::thread::scope(|scope| {
+        let fold_handles: Vec<_> = (0..folds)
+            .map(|held| {
+                scope.spawn(move || {
+                    let others: Vec<&Response> = positions
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, _)| *i != held)
+                        .map(|(_, r)| r)
+                        .collect();
+                    let training = power_mean(&others);
+                    let fold_fits = fit_all(&problem(&training, target));
+                    let test = problem(&positions[held], target);
+                    fold_fits
+                        .iter()
+                        .map(|f| test.rms(&response_db(f, test.freqs)))
+                        .collect::<Vec<f64>>()
+                })
+            })
+            .collect();
+        let fits = fit_all(&p);
+        let errors = fold_handles
+            .into_iter()
+            .map(|h| h.join().expect("fit threads do not panic"))
+            .collect();
+        (fits, errors)
+    });
     let training_error: Vec<f64> = fits
         .iter()
         .map(|f| p.rms(&response_db(f, p.freqs)))
@@ -257,23 +304,7 @@ pub fn fit_auto(
 
     let (chosen, method, curve) = if positions.len() >= 2 {
         // errors[fold][count]
-        let errors: Vec<Vec<f64>> = (0..positions.len())
-            .map(|held| {
-                let others: Vec<&Response> = positions
-                    .iter()
-                    .enumerate()
-                    .filter(|(i, _)| *i != held)
-                    .map(|(_, r)| r)
-                    .collect();
-                let training = power_mean(&others);
-                let fold_fits = fit_all(&problem(&training, target));
-                let test = problem(&positions[held], target);
-                fold_fits
-                    .iter()
-                    .map(|f| test.rms(&response_db(f, test.freqs)))
-                    .collect()
-            })
-            .collect();
+        let errors = fold_errors;
         let folds = errors.len() as f64;
         let mean: Vec<f64> = (0..=AUTO_MAX_FILTERS)
             .map(|k| errors.iter().map(|e| e[k]).sum::<f64>() / folds)
@@ -361,8 +392,14 @@ fn problem<'a>(measured: &'a Response, target: &'a Target) -> Problem<'a> {
 }
 
 fn fit_problem(problem: &Problem<'_>, max_filters: usize) -> Vec<Filter> {
+    let start = seeds(problem, max_filters).pop().unwrap_or_default();
+    finish(problem, start)
+}
+
+/// Refines placed filters fully, merges any that converged onto one spot, and rounds them
+/// to what the EQ program stores.
+fn finish(problem: &Problem<'_>, mut filters: Vec<Filter>) -> Vec<Filter> {
     let target = problem.target;
-    let mut filters = seed(problem, max_filters);
     refine(problem, &mut filters, 400);
     let before = filters.len();
     merge_duplicates(&mut filters, target);
@@ -448,11 +485,13 @@ fn seed_one(
     }
 }
 
-/// Greedy seeding interleaved with short refinements.
-fn seed(p: &Problem<'_>, max_filters: usize) -> Vec<Filter> {
+/// Greedy seeding interleaved with short refinements: the filters after placing each one,
+/// up to `max_filters` (fewer when nothing more is worth correcting).
+fn seeds(p: &Problem<'_>, max_filters: usize) -> Vec<Vec<Filter>> {
     let n = p.error.len();
     let mut skipped = vec![false; n];
     let mut filters: Vec<Filter> = Vec::new();
+    let mut placed = Vec::new();
     while filters.len() < max_filters {
         let eq = super::response_db(&filters, p.freqs);
         let residual: Vec<f64> = p.error.iter().zip(&eq).map(|(e, q)| e + q).collect();
@@ -462,8 +501,9 @@ fn seed(p: &Problem<'_>, max_filters: usize) -> Vec<Filter> {
         };
         filters.push(filter);
         refine(p, &mut filters, 40);
+        placed.push(filters.clone());
     }
-    filters
+    placed
 }
 
 /// Finds the in-range same-sign run with the largest weighted area.
@@ -703,5 +743,43 @@ pub fn design_with_positions(
         },
         options: *options,
         imbalance_db,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dsp::spectrum::grid;
+
+    /// A speaker in a room: rolled off below 45 Hz, a few peaks and dips.
+    fn measured() -> Response {
+        let freqs: Vec<f64> = grid().into_iter().filter(|&f| f <= 20_000.0).collect();
+        let bump =
+            |f: f64, at: f64, db: f64, width: f64| db * (-((f / at).log2() / width).powi(2)).exp();
+        let db = freqs
+            .iter()
+            .map(|&f| {
+                80.0 - 24.0 * (45.0 / f).max(1.0).log2()
+                    + bump(f, 33.0, 9.0, 0.08)
+                    + bump(f, 62.0, -7.0, 0.1)
+                    + bump(f, 120.0, 6.0, 0.15)
+                    + bump(f, 900.0, -3.0, 0.4)
+                    + bump(f, 3000.0, 2.5, 0.5)
+            })
+            .collect();
+        Response { freqs, db }
+    }
+
+    #[test]
+    fn placing_the_filters_once_fits_every_count_as_fitting_it_alone_would() {
+        let m = measured();
+        let target = Target::for_response(&m, &DesignOptions::default());
+        let p = problem(&m, &target);
+        let all = fit_all(&p);
+        assert!(all[0].is_empty());
+        for (n, fitted) in all.iter().enumerate().skip(1) {
+            assert_eq!(*fitted, fit_problem(&p, n), "{n} filters");
+        }
+        assert!(!all[AUTO_MAX_FILTERS].is_empty());
     }
 }

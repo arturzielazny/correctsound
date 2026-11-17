@@ -63,7 +63,8 @@ pub(super) fn result(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Gra
         gfx,
     );
 
-    let o = &design.options;
+    // The options as asked for, at once; the numbers below them follow with the design.
+    let o = &app.design_options;
     let mut lines = vec![
         Line::from(format!(
             "Tilt         {:+.2} dB/oct  (t/T)",
@@ -83,7 +84,11 @@ pub(super) fn result(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Gra
                 None => format!("auto ({})", ch.filters.len()),
             }
         )),
-        Line::from(""),
+        Line::from(if app.designing() {
+            Span::styled("updating…", Style::default().fg(Color::DarkGray))
+        } else {
+            Span::raw("")
+        }),
         Line::from(format!(
             "Corrected    {:.0}–{:.0} Hz",
             ch.target.low_hz, ch.target.high_hz

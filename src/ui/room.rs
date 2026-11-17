@@ -515,7 +515,15 @@ fn mix(a: Rgb, b: Rgb, t: f64) -> Rgb {
 
 /// The colour of a place on the plan: the mode's loudness (red and blue for its two
 /// phases), or how even the seat is (green even, red uneven), over the background.
-fn heat(d: &Derived, mode: Option<RoomMode>, view: PlanView, theme: &Theme, x: f64, y: f64) -> Rgb {
+/// The colour of the floor at (`x`, `y`); `range` is [`map_range`] of the seat map, worked
+/// out once per drawing rather than per cell.
+fn heat(
+    d: &Derived,
+    (mode, view, range): (Option<RoomMode>, PlanView, (f64, f64)),
+    theme: &Theme,
+    x: f64,
+    y: f64,
+) -> Rgb {
     let bg = theme.background;
     match (view, mode) {
         (PlanView::Mode, Some(m)) => {
@@ -531,7 +539,7 @@ fn heat(d: &Derived, mode: Option<RoomMode>, view: PlanView, theme: &Theme, x: f
             mix(bg, c, v.abs() * 0.6)
         }
         _ => {
-            let (lo, hi) = map_range(d);
+            let (lo, hi) = range;
             let t = ((d.seat_map.at(x, y) - lo) / (hi - lo).max(0.1)).clamp(0.0, 1.0);
             let c = if t < 0.5 {
                 mix(theme.green, theme.yellow, t * 2.0)
@@ -607,6 +615,7 @@ fn draw_plan(
     let at = |x: f64, y: f64| ((ox + y * scale) as f32, (oy + x * scale) as f32);
 
     // The floor, coloured.
+    let range = map_range(d);
     let cell = (px / 3.0).max(3.0);
     let (w_px, h_px) = ((room.width * scale) as f32, (room.length * scale) as f32);
     let mut py = 0.0f32;
@@ -615,7 +624,13 @@ fn draw_plan(
         while pxx < w_px {
             let x = f64::from(py + cell / 2.0) / scale;
             let y = f64::from(pxx + cell / 2.0) / scale;
-            let c = heat(d, mode, view, theme, x.min(room.length), y.min(room.width));
+            let c = heat(
+                d,
+                (mode, view, range),
+                theme,
+                x.min(room.length),
+                y.min(room.width),
+            );
             let (cx, cy) = at(0.0, 0.0);
             canvas.rect(cx + pxx, cy + py, cell + 1.0, cell + 1.0, c, 1.0);
             pxx += cell;
@@ -806,12 +821,13 @@ fn plan_cells(
             .clamp(0.0, f64::from(rows - 1)) as u16;
         (x0 + c, y0 + r)
     };
+    let range = map_range(d);
     let buf = frame.buffer_mut();
     for r in 0..rows {
         for c in 0..cols {
             let x = (f64::from(r) + 0.5) / f64::from(rows) * room.length;
             let y = (f64::from(c) + 0.5) / f64::from(cols) * room.width;
-            let color = heat(d, mode, view, theme, x, y);
+            let color = heat(d, (mode, view, range), theme, x, y);
             if let Some(cell) = buf.cell_mut((x0 + c, y0 + r)) {
                 cell.set_bg(color.tui());
                 cell.set_symbol(" ");
