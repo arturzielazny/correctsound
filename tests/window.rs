@@ -37,10 +37,6 @@ const CHANGED_FRAMES: f64 = 1.0;
 const PLACEMENT_FRAMES: f64 = 1.0;
 /// A frame with nothing new: laid out and found unchanged (1–3 ms).
 const STEADY_FRAME_MS: f64 = 30.0;
-/// A key on the room screen and the work it starts, worked out once before the frame
-/// (about 45 ms in the test build: the room model, not drawing), as in
-/// `tests/performance.rs`.
-const KEY_MS: f64 = 50.0;
 
 /// The window's screen, and the GPU when there is one.
 struct Window {
@@ -194,12 +190,11 @@ fn the_window_draws_at_once() {
         let t = Instant::now();
         press(&mut app, key);
         app.tick();
+        let work = ms(t);
         let (frame, _) = window.frame(&app, shot);
-        within(
-            &format!("{name}: key, work and frame"),
-            ms(t),
-            KEY_MS + changed,
-        );
-        within("  the frame", frame, changed);
+        // The key and the room model's work are the app's, timed in tests/performance.rs;
+        // here only the window's frame is judged.
+        eprintln!("{:<44} {work:7.1} ms", format!("{name}: key and work"));
+        within("  its frame", frame, changed);
     }
 }
