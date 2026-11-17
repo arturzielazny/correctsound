@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 /// An sRGB colour.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Rgb(pub u8, pub u8, pub u8);
 
 impl Rgb {
@@ -39,6 +39,20 @@ pub struct Theme {
     pub cyan: Rgb,
     pub blue: Rgb,
     pub magenta: Rgb,
+    /// The terminal colours text is drawn in, where they differ from the roles above.
+    pub text: TextColors,
+}
+
+/// Text colours not among the chart roles: brighter variants and greys.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextColors {
+    pub black: Rgb,
+    pub light_red: Rgb,
+    pub light_green: Rgb,
+    pub light_blue: Rgb,
+    pub cyan: Rgb,
+    pub gray: Rgb,
+    pub white: Rgb,
 }
 
 impl Theme {
@@ -82,6 +96,41 @@ impl Theme {
             cyan: get("cyan", "#449dab"),
             blue: get("blue", "#7aa2f7"),
             magenta: get("magenta", "#ad8ee6"),
+            text: TextColors {
+                black: get("dark_background", "#15161e"),
+                light_red: get("bright_red", "#ff7a93"),
+                light_green: get("bright_green", "#b9f27c"),
+                light_blue: get("bright_blue", "#7da6ff"),
+                cyan: Rgb(0x7d, 0xcf, 0xff),
+                gray: Rgb(0x9a, 0xa5, 0xce),
+                white: get("bright_foreground", "#c0caf5"),
+            },
+        }
+    }
+
+    /// The colour a terminal in this theme shows for `c`, as text (`fg`) or behind it.
+    #[must_use]
+    pub fn cell(&self, c: ratatui::style::Color, fg: bool) -> Rgb {
+        use ratatui::style::Color;
+        let t = &self.text;
+        match c {
+            Color::Reset if fg => self.foreground,
+            Color::Reset => self.background,
+            Color::Black => t.black,
+            Color::Red => self.red,
+            Color::LightRed => t.light_red,
+            Color::Green => self.green,
+            Color::LightGreen => t.light_green,
+            Color::Yellow | Color::LightYellow => self.yellow,
+            Color::Blue => self.blue,
+            Color::LightBlue => t.light_blue,
+            Color::Magenta | Color::LightMagenta => self.magenta,
+            Color::Cyan | Color::LightCyan => t.cyan,
+            Color::Gray => t.gray,
+            Color::DarkGray => self.dim,
+            Color::White => t.white,
+            Color::Rgb(r, g, b) => Rgb(r, g, b),
+            Color::Indexed(_) => self.foreground,
         }
     }
 }

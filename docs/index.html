@@ -78,8 +78,12 @@ nav.top .gh { padding: 6px 14px; border: 1px solid var(--line); border-radius: 9
 .btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 20px; border-radius: 10px; font-weight: 600; border: 1px solid var(--line); color: var(--fg); background: var(--panel); }
 .btn.primary { background: var(--accent); color: #11121a; border-color: transparent; }
 .btn:hover { text-decoration: none; filter: brightness(1.08); }
-.install { margin-top: 18px; display: flex; width: fit-content; white-space: nowrap; align-items: center; gap: 10px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; font: .92rem var(--mono); color: var(--fg); max-width: 100%; overflow-x: auto; }
-.install .prompt { color: var(--green); }
+.install { margin-top: 18px; display: flex; width: fit-content; white-space: nowrap; align-items: center; gap: 10px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 8px 8px 14px; font: .92rem var(--mono); color: var(--fg); max-width: 100%; }
+.install .prompt { color: var(--green); flex: none; }
+/* The command scrolls on a phone; one click selects all of it, the button copies it. */
+.install .cmd { min-width: 0; overflow-x: auto; user-select: all; -webkit-user-select: all; padding: 2px 0; background: none; border: 0; font-size: inherit; color: inherit; }
+.install .copy { position: static; flex: none; font-size: .8rem; padding: 6px 12px; }
+.install.small { margin-top: 10px; font-size: .8rem; }
 .os-note { margin: 10px 0 0; font-size: .92rem; color: var(--muted); }
 .yes { color: var(--green); font-weight: 600; }
 .no { color: var(--muted); }
@@ -234,8 +238,8 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
       <a class="btn" href="#yours">Make it yours with your AI agent</a>
     </div>
     <a class="spot" href="#treatment" style="text-decoration:none"><span class="tag">Room treatment</span><span>Carry a bass trap from corner to corner and <b>watch the bass change as you walk</b>.</span><span style="color:var(--green)">How →</span></a>
-    <div class="install"><span class="prompt">$</span> cargo install --git https://github.com/arturzielazny/correctsound &amp;&amp; correctsound --simulate</div>
-    <p class="os-note">The simulator tour runs on Linux, macOS and Windows. Measuring real speakers works on Linux today; <a href="#where">what works where</a>.</p>
+    <div class="install"><span class="prompt">$</span><code class="cmd">curl -fsSL https://arturzielazny.github.io/correctsound/install.sh | sh</code><button class="copy" type="button" data-copy="curl -fsSL https://arturzielazny.github.io/correctsound/install.sh | sh">Copy</button></div>
+    <p class="os-note">Then <code>correctsound --simulate</code> tours a simulated room. Ready-made for Linux and macOS (<a href="#install">Windows</a>), nothing to compile. Measuring real speakers works on Linux today; <a href="#where">what works where</a>.</p>
     <figure class="shot">
       <img src="img/6-result.png" alt="The result screen: the measured response (orange), the target (dashed green) and the predicted result (blue), above the equalizer's curve and a list of filters" width="1800" height="1144">
     </figure>
@@ -248,6 +252,12 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
     <div class="eyebrow">What's new</div>
     <h2>Recent changes</h2>
     <dl class="changes">
+      <dt>17 Nov 2026</dt>
+      <dd><ul>
+        <li><b>Version 0.2.0.</b> A ready-made program for Linux, macOS and Windows, so there is no Rust to install and nothing to compile: <a href="#install">one line</a> installs it on Linux and macOS.</li>
+        <li id="window" style="scroll-margin-top:80px">An experimental window: <code>correctsound --window</code> shows the same screens and keys in a window of its own, drawn on the GPU (all Rust: vello on wgpu, for Vulkan, Metal and DirectX). On a 5K monitor a chart update takes 2–3 ms of processor time instead of 40, and the terminal no longer has images to decode. The ready-made program includes it; <kbd>Ctrl</kbd> with <kbd>+</kbd>, <kbd>−</kbd> or <kbd>0</kbd> sizes the text. The terminal stays as it is.</li>
+        <li>Instant on large screens: charts go to the terminal compressed (1 MB instead of 48 MB per change on a 5K monitor), the EQ is worked out in the background and four times faster, and the room screen is ready before you open it.</li>
+      </ul></dd>
       <dt>16 Nov 2026</dt>
       <dd><ul>
         <li><a href="#room">Your room from above</a> (<kbd>r</kbd>): the room's size and where the speakers stand, guessed from the measurement alone, the standing waves, and where to sit. Enter your own numbers as you would measure them; <kbd>m</kbd> mirrors the setup.</li>
@@ -256,7 +266,6 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
         <li>Setting the level is quicker, and louder than the room needs is fine up to 85 dB.</li>
         <li>Each mic position shows faintly behind the average.</li>
         <li>A warning when the selected output is not the one your last measurement used.</li>
-        <li>Instant on large screens: charts go to the terminal compressed (1 MB instead of 48 MB per change on a 5K monitor), the EQ is worked out in the background and four times faster, and the room screen is ready before you open it.</li>
         <li><a href="https://github.com/arturzielazny/correctsound/discussions">Discussions</a> are open: ask, share your room, suggest ideas.</li>
       </ul></dd>
       <dt>15 Nov 2026</dt>
@@ -910,15 +919,24 @@ and how you would test it on the simulator. Wait for my go-ahead before writing 
       <tr><td>Measuring your speakers, live placement, applying the EQ</td><td class="yes">yes</td><td class="no">not yet</td><td class="no">not yet</td></tr>
     </table>
     <p style="margin-top:14px">On macOS and Windows every change is built and tested automatically, but measuring needs a platform module that nobody has written yet: <a href="#platforms">it is one folder, and your AI agent can write it</a>. Until then, <code>correctsound</code> there says so and points to the simulator.</p>
-    <p><b>You need Rust</b> everywhere (<a href="https://rustup.rs">rustup.rs</a>). <b>On Linux</b>, also PipeWire with WirePlumber and <code>alsa-utils</code>, on any distribution. EasyEffects is optional: without it you still get the filter files. Any terminal works; Ghostty, kitty, WezTerm and foot show the charts as images, others draw them with braille dots.</p>
+    <p><b>On Linux and macOS</b>, one line installs the ready-made program (no Rust, nothing to compile), checked against its published checksum, into <code>~/.local/bin</code>. Run it again to update.</p>
+    <div class="install small"><span class="prompt">$</span><code class="cmd">curl -fsSL https://arturzielazny.github.io/correctsound/install.sh | sh</code><button class="copy" type="button" data-copy="curl -fsSL https://arturzielazny.github.io/correctsound/install.sh | sh">Copy</button></div>
+    <p style="margin-top:14px"><b>On Windows</b>, download <code>correctsound-x86_64-pc-windows-msvc.zip</code> from the <a href="https://github.com/arturzielazny/correctsound/releases/latest">latest release</a> and run <code>correctsound.exe --simulate</code> in a terminal. Every download is also on that page, if you prefer to <a href="https://arturzielazny.github.io/correctsound/install.sh">read the script</a> first and do it by hand.</p>
+    <p><b>To measure on Linux</b> you also need PipeWire with WirePlumber and <code>alsa-utils</code>, on any distribution. EasyEffects is optional: without it you still get the filter files. Any terminal works; Ghostty, kitty, WezTerm and foot show the charts as images, others draw them with braille dots. Or skip the terminal: <code>--window</code> opens it in a window of its own.</p>
+    <details class="prompt" style="margin-top:14px"><summary>From source, to change it (needs Rust)</summary><div class="body">
+    <p>With <a href="https://rustup.rs">Rust</a> installed, straight from GitHub (add <code>--features window</code> for the window):</p>
+    <div class="install small"><span class="prompt">$</span><code class="cmd">cargo install --git https://github.com/arturzielazny/correctsound</code><button class="copy" type="button" data-copy="cargo install --git https://github.com/arturzielazny/correctsound">Copy</button></div>
+    <p style="margin-top:14px">Or from a clone:</p>
     <pre>git clone https://github.com/arturzielazny/correctsound
 cd correctsound
-cargo install --path .
-
-correctsound --simulate      # a tour with a simulated room, no hardware (any OS)
+cargo install --path . --features window</pre>
+    </div></details>
+    <p style="margin-top:14px">Then:</p>
+    <pre>correctsound --simulate      # a tour with a simulated room, no hardware (any OS)
 correctsound                 # the real thing, on Linux: plug in the UMIK-1 first
 correctsound sessions        # your saved measurements
-correctsound review          # open the newest again, re-analysed, nothing played</pre>
+correctsound review          # open the newest again, re-analysed, nothing played
+correctsound --window        # in a window of its own, drawn on the GPU (experimental)</pre>
     <table style="margin-top:26px">
       <tr><th>Key</th><th>Where</th><th>Does</th></tr>
       <tr><td><kbd>Enter</kbd></td><td>everywhere</td><td>the screen's main action</td></tr>
@@ -966,6 +984,14 @@ correctsound review          # open the newest again, re-analysed, nothing playe
 <div class="lightbox" id="lb"><img alt=""></div>
 
 <script>
+// Copy buttons: the install commands carry their text in data-copy.
+document.querySelectorAll('button[data-copy]').forEach(b => {
+  b.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = 'Copied'; }
+    catch { b.textContent = 'Select and copy'; }
+    setTimeout(() => b.textContent = 'Copy', 1600);
+  });
+});
 // Copy buttons on prompts.
 document.querySelectorAll('pre.copyable').forEach(pre => {
   const text = pre.textContent;

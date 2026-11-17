@@ -32,3 +32,9 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Test
         run: cargo test
+      # The window (--window) is optional while it is an experiment, but kept building and
+      # drawing on every OS. Without a GPU on the runner, its test times the CPU's part only.
+      - name: Lint the window
+        run: cargo clippy --all-targets --features window -- -D warnings
+      - name: Test the window
+        run: cargo test --features window --lib --test window

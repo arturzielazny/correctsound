@@ -1,6 +1,6 @@
 [package]
 name = "correctsound"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Room correction for Linux: measure speakers with a UMIK-1 and load the EQ into EasyEffects, in a terminal wizard"
 license = "MIT"
@@ -28,6 +28,17 @@ thiserror = "2.0.21"
 tiny-skia = "0.12.0"
 toml = "1.2.1"
 ureq = "3.5.2"
+# The window (--window): drawn on the GPU, all in Rust. Optional while it is an experiment.
+pollster = { version = "1.0.2", optional = true }
+vello = { version = "0.12.0", optional = true, default-features = false, features = ["wgpu"] }
+# Only the GPU interfaces vello supports: Vulkan (Linux, Windows), Metal (macOS), DirectX 12
+# (Windows). wgpu picks its interface at run time, so one left in is compiled in whether it
+# is used or not; OpenGL is left out (vello does not support it), 0.6 MB less.
+wgpu = { version = "30.0.2", optional = true, default-features = false, features = ["std", "parking_lot", "vulkan", "metal", "dx12", "wgsl"] }
+winit = { version = "0.30.13", optional = true }
+
+[features]
+window = ["dep:pollster", "dep:vello", "dep:wgpu", "dep:winit"]
 
 [lints.rust]
 unsafe_code = "forbid"
@@ -44,6 +55,16 @@ opt-level = 3
 [profile.test]
 opt-level = 2
 
+# The released binaries: without symbols they are a third the size.
+[profile.release]
+strip = true
+
 [dev-dependencies]
 # PNG output for examples/screenshots.rs only.
 image = { version = "0.25.10", default-features = false, features = ["png"] }
+
+# What releases are built with (`--profile dist`): slower to build, smaller and as fast.
+[profile.dist]
+inherits = "release"
+lto = "fat"
+codegen-units = 1

@@ -44,6 +44,17 @@ struct Cli {
     /// dB added to mic dBFS readings to get dB SPL (default: 124 − sensitivity factor).
     #[arg(long, value_name = "DB", allow_hyphen_values = true)]
     spl_offset: Option<f64>,
+    /// Open in a window of its own, drawn on the GPU, instead of the terminal (experimental;
+    /// needs a build with `--features window`).
+    #[arg(long, global = true)]
+    window: bool,
+}
+
+/// Where the wizard is shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Screen {
+    Terminal,
+    Window,
 }
 
 #[derive(Debug, Subcommand)]
@@ -81,6 +92,11 @@ enum Command {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    let screen = if cli.window {
+        Screen::Window
+    } else {
+        Screen::Terminal
+    };
     match cli.command {
         Some(Command::Devices) => devices(),
         Some(Command::Sessions) => {
@@ -89,11 +105,14 @@ fn main() -> Result<()> {
         }
         Some(Command::Review { session }) => {
             let dir = pick_session(session.as_deref())?;
-            wizard(Options {
-                cal_file: cli.cal_file,
-                review: Some(dir),
-                ..Options::default()
-            })
+            wizard(
+                Options {
+                    cal_file: cli.cal_file,
+                    review: Some(dir),
+                    ..Options::default()
+                },
+                screen,
+            )
         }
         Some(Command::Meter { seconds }) => meter(seconds, cli.cal_file.as_deref(), cli.spl_offset),
         Some(Command::Fit {
@@ -102,15 +121,18 @@ fn main() -> Result<()> {
             high_limit,
             filters,
         }) => fit(&session, tilt, high_limit, filters, cli.cal_file.as_deref()),
-        None => wizard(Options {
-            simulate: cli.simulate,
-            cal_file: cli.cal_file,
-            source: cli.source,
-            spl_offset: cli.spl_offset,
-            sink: cli.sink,
-            review: None,
-            ..Options::default()
-        }),
+        None => wizard(
+            Options {
+                simulate: cli.simulate,
+                cal_file: cli.cal_file,
+                source: cli.source,
+                spl_offset: cli.spl_offset,
+                sink: cli.sink,
+                review: None,
+                ..Options::default()
+            },
+            screen,
+        ),
     }
 }
 
@@ -169,7 +191,11 @@ fn pick_session(arg: Option<&str>) -> Result<PathBuf> {
         .context("no saved sessions yet")
 }
 
-fn wizard(options: Options) -> Result<()> {
+fn wizard(options: Options, screen: Screen) -> Result<()> {
+    #[cfg(not(feature = "window"))]
+    if screen == Screen::Window {
+        bail!("this build has no window; build it with: cargo install --path . --features window");
+    }
     // Restore the system on SIGTERM / SIGHUP / SIGINT (raw mode turns Ctrl-C into a key).
     let signalled = Arc::new(AtomicBool::new(false));
     #[cfg(unix)]
@@ -184,11 +210,15 @@ fn wizard(options: Options) -> Result<()> {
         signal_hook::flag::register(sig, Arc::clone(&signalled))
             .context("installing signal handler")?;
     }
-    spawn_watchdog(Arc::clone(&signalled));
-    let mut terminal = ratatui::init();
+    spawn_watchdog(Arc::clone(&signalled), screen);
+    let mut terminal = (screen == Screen::Terminal).then(ratatui::init);
     // Charts as images where the terminal can show them (asks the terminal, in raw mode,
     // before the loop below starts reading keys).
-    let mut gfx = Graphics::detect();
+    let mut gfx = if terminal.is_some() {
+        Graphics::detect()
+    } else {
+        Graphics::text_only()
+    };
     // ratatui's hook restores the terminal; ours also restores the system first.
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -197,31 +227,39 @@ fn wizard(options: Options) -> Result<()> {
     }));
 
     let mut app = App::new(options);
-    let result = (|| -> Result<()> {
-        while !app.quit && !signalled.load(Ordering::Relaxed) {
-            gfx.refresh_cell_size();
-            gfx.begin_frame();
-            terminal.draw(|f| correctsound::ui::draw(f, &app, &mut gfx))?;
-            // Every key already waiting is handled before the next frame: a quick run of
-            // presses is drawn once, at the end, instead of one frame behind the other.
-            let mut wait = Duration::from_millis(50);
-            while !app.quit && event::poll(wait)? {
-                if let Event::Key(key) = event::read()?
-                    && key.kind == KeyEventKind::Press
-                {
-                    app.handle_key(key);
+    let result = match &mut terminal {
+        Some(terminal) => (|| -> Result<()> {
+            while !app.quit && !signalled.load(Ordering::Relaxed) {
+                gfx.refresh_cell_size();
+                gfx.begin_frame();
+                terminal.draw(|f| correctsound::ui::draw(f, &app, &mut gfx))?;
+                // Every key already waiting is handled before the next frame: a quick run of
+                // presses is drawn once, at the end, instead of one frame behind the other.
+                let mut wait = Duration::from_millis(50);
+                while !app.quit && event::poll(wait)? {
+                    if let Event::Key(key) = event::read()?
+                        && key.kind == KeyEventKind::Press
+                    {
+                        app.handle_key(key);
+                    }
+                    wait = Duration::ZERO;
                 }
-                wait = Duration::ZERO;
+                app.tick();
             }
-            app.tick();
-        }
-        Ok(())
-    })();
+            Ok(())
+        })(),
+        #[cfg(feature = "window")]
+        None => correctsound::ui::window::run(&mut app, Arc::clone(&signalled)),
+        #[cfg(not(feature = "window"))]
+        None => Ok(()),
+    };
     let session = app.session_dir();
     let undo = restore::pending();
     drop(app); // stops any audio
     restore::run_all();
-    ratatui::restore();
+    if terminal.is_some() {
+        ratatui::restore();
+    }
     if !undo.is_empty() {
         println!("Restored: {}", undo.join(", "));
     }
@@ -239,13 +277,14 @@ const SIGNAL_GRACE: Duration = Duration::from_secs(1);
 /// Ends the program, restoring the system first, when its terminal goes away or a signal
 /// is not acted on. Without it a closed terminal left the wizard spinning at full CPU with
 /// the system unrestored: crossterm's `event::read` retries the dead terminal's
-/// end-of-input forever, so the main loop never got to check the signal flag.
-fn spawn_watchdog(signalled: Arc<AtomicBool>) {
+/// end-of-input forever, so the main loop never got to check the signal flag. A window
+/// needs no terminal (it may have been opened from an app launcher): only signals count.
+fn spawn_watchdog(signalled: Arc<AtomicBool>, screen: Screen) {
     std::thread::spawn(move || {
         let mut signal_seen: Option<std::time::Instant> = None;
         loop {
             std::thread::sleep(WATCHDOG_PERIOD);
-            let terminal_gone = terminal_gone();
+            let terminal_gone = screen == Screen::Terminal && terminal_gone();
             if !terminal_gone {
                 if !signalled.load(Ordering::Relaxed) {
                     continue;
@@ -256,7 +295,7 @@ fn spawn_watchdog(signalled: Arc<AtomicBool>) {
                 }
             }
             restore::run_all();
-            if !terminal_gone {
+            if !terminal_gone && screen == Screen::Terminal {
                 ratatui::restore();
             }
             // Children (pw-cat) end on their own: playback at the end of its input, capture

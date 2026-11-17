@@ -1,0 +1,81 @@
+# Ready-made binaries, so nobody has to install Rust or compile: pushing a version tag
+# (v0.2.0) builds CorrectSound, with its window, for each system and publishes them as a
+# GitHub release. docs/install.sh downloads the right one.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The oldest supported Ubuntu, so the binaries run on any distribution with its
+          # C library (glibc 2.35) or newer.
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu }
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: macos-latest, target: x86_64-apple-darwin }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build
+        run: cargo build --profile dist --locked --features window --target ${{ matrix.target }}
+      - name: Package
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          name=correctsound-${{ matrix.target }}
+          mkdir "$name"
+          cp "target/${{ matrix.target }}/dist/correctsound" README.md LICENSE "$name/"
+          tar -czf "$name.tar.gz" "$name"
+          shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
+      - name: Package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $name = "correctsound-${{ matrix.target }}"
+          New-Item -ItemType Directory $name | Out-Null
+          Copy-Item "target/${{ matrix.target }}/dist/correctsound.exe", README.md, LICENSE $name
+          Compress-Archive $name "$name.zip"
+          $hash = (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name.zip" | Out-File -Encoding ascii -NoNewline "$name.zip.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: correctsound-${{ matrix.target }}.*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" correctsound-* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "CorrectSound ${GITHUB_REF_NAME#v}" \
+            --notes "Install on Linux or macOS:
+
+          \`\`\`sh
+          curl -fsSL https://arturzielazny.github.io/correctsound/install.sh | sh
+          \`\`\`
+
+          On Windows, download the zip below and run \`correctsound.exe --simulate\` (measuring works on Linux so far).
+
+          What changed: https://arturzielazny.github.io/correctsound/#new"

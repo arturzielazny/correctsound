@@ -16,10 +16,16 @@ what's new. <https://arturzielazny.github.io/correctsound/>**
 ## Install and run
 
 ```sh
-cargo install --git https://github.com/arturzielazny/correctsound
+curl -fsSL https://arturzielazny.github.io/correctsound/install.sh | sh
 correctsound --simulate    # the whole app against a simulated room, no hardware, any OS
 correctsound               # measure your speakers
+correctsound --window      # in a window of its own, drawn on the GPU (experimental)
 ```
+
+The script installs the ready-made program for Linux or macOS from the
+[latest release](https://github.com/arturzielazny/correctsound/releases/latest) into
+`~/.local/bin`; Windows has a zip there. From source, with Rust:
+`cargo install --git https://github.com/arturzielazny/correctsound --features window`.
 
 On Linux it needs PipeWire (`pw-cat`, `pw-dump`), WirePlumber (`wpctl`) and `alsa-utils`
 (`amixer`). EasyEffects is optional: without it you still get the EQ files. On macOS and Windows

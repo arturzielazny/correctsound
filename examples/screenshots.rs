@@ -309,27 +309,7 @@ impl Shots {
     }
 
     fn color(&self, c: Color, fg: bool) -> Rgb {
-        let t = &self.theme;
-        let hex = |v: u32| Rgb((v >> 16) as u8, (v >> 8) as u8, v as u8);
-        match c {
-            Color::Reset if fg => t.foreground,
-            Color::Reset => t.background,
-            Color::Black => hex(0x15_16_1e),
-            Color::Red => t.red,
-            Color::LightRed => hex(0xff_7a_93),
-            Color::Green => t.green,
-            Color::LightGreen => hex(0xb9_f2_7c),
-            Color::Yellow | Color::LightYellow => t.yellow,
-            Color::Blue => t.blue,
-            Color::LightBlue => hex(0x7d_a6_ff),
-            Color::Magenta | Color::LightMagenta => t.magenta,
-            Color::Cyan | Color::LightCyan => hex(0x7d_cf_ff),
-            Color::Gray => hex(0x9a_a5_ce),
-            Color::DarkGray => t.dim,
-            Color::White => hex(0xc0_ca_f5),
-            Color::Rgb(r, g, b) => Rgb(r, g, b),
-            Color::Indexed(_) => t.foreground,
-        }
+        self.theme.cell(c, fg)
     }
 
     fn compose(

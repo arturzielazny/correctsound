@@ -16,6 +16,8 @@ mod result;
 pub mod room;
 mod save;
 pub mod theme;
+#[cfg(feature = "window")]
+pub mod window;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};

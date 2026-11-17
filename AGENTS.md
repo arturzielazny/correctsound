@@ -36,6 +36,9 @@ src/app/               the wizard's state machine: mod.rs holds the App, the ste
                        screens) with its state, its keys and its background work
 src/ui/                drawing (ratatui; charts as images or braille): mod.rs the frame,
                        header, footer and key hints; a file per screen, named as in src/app/
+src/ui/window/         the window (--window, cargo feature `window`): the same screens drawn on
+                       the GPU with vello; ratatui's cells become a scene (grid.rs), keys
+                       become the terminal's keys (keys.rs)
 src/restore.rs         undo steps run on exit, errors, panics and signals
 src/paths.rs           where files go (XDG layout under the home directory, every OS)
 ```
@@ -43,7 +46,8 @@ src/paths.rs           where files go (XDG layout under the home directory, ever
 Everything outside `src/platform/` must stay OS-neutral: no `#[cfg(target_os)]`, no names
 of OS tools or settings, no fields that only mean something on one OS. The only
 exceptions are small, documented ones in `src/main.rs` (signals, detecting a closed
-terminal) and `src/ui/raster.rs` (font locations); keep them that small.
+terminal), `src/ui/raster.rs` (font locations) and the window's app id for window managers
+(`src/ui/window/mod.rs`); keep them that small.
 
 The two interfaces a platform implements:
 
@@ -134,7 +138,17 @@ uncompressed images, a run of keys is worked out once per key, or drawing slows 
 drawing budgets are measured against a yardstick on the machine running it). Heavy work
 (designing the EQ, guessing the room) runs in the background or once per frame, never on
 the key; work that repeats per pixel or per cell stays out of loops. Run it with
-`-- --nocapture` to see the times.
+`-- --nocapture` to see the times. The window has its own, `tests/window.rs`
+(`cargo test --features window --test window`); charts draw through `Canvas`, so they work
+in the terminal and in the window alike.
+
+## Releasing
+
+Users install ready-made binaries (`docs/install.sh`, the website's one-line install), so a
+release is what reaches them: raise `version` in Cargo.toml, add the changes to "What's new"
+in `docs/index.html`, commit, then tag and push the tag (`git tag v0.3.0 && git push origin
+v0.3.0`). `.github/workflows/release.yml` builds Linux (x86_64, ARM), macOS (Apple silicon,
+Intel) and Windows binaries, with the window, and publishes them as the latest release.
 
 Code style: each file starts with a comment saying what it is for; messages to the user
 are plain sentences; errors in user input are reported, never `panic!`ed.

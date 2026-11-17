@@ -167,6 +167,38 @@ in 30 s instead of 45). To build it:
 5. Keep one-after-the-other as a fallback where the clean stretch is too short (a room
    ringing longer than about 1.5 s at its lowest wave).
 
+## The window (`--window`, experimental)
+
+The same screens and keys in a window of its own, drawn on the GPU, all in Rust: ratatui lays
+the screen out in cells as in the terminal, then vello (on wgpu: Vulkan, Metal, DirectX 12)
+draws the text and the charts straight from the app. Charts draw through the same `Canvas`,
+which records a vello scene there instead of pixels, so every chart works in both. It is a
+cargo feature (`--features window`) while it is tried out.
+
+Measured on a 5120 × 2160 screen, release build, laptop with a Radeon 890M:
+
+| | terminal (kitty images) | window |
+|---|---|---|
+| result screen, a frame whose charts changed | 40 ms CPU, then the terminal decodes 1 MB | 3 ms CPU, 6 ms on the GPU |
+| a placement update | 40 ms CPU | 2 ms CPU, 5 ms on the GPU |
+| room screen | 22 ms | 2.4 ms |
+
+`tests/window.rs` keeps it so, and checks that each frame is a picture where a GPU is found.
+
+Next for it:
+
+- The room screen's keys now wait for the room model, not for drawing (45–80 ms in the test
+  build after →, `v` or `g`): move that work off the key too.
+- Tick faster than 50 ms while something moves (the level meter, placement), so meters run
+  at the screen's rate; the GPU makes that cheap.
+- What only a window can do: the exact Hz and dB under the mouse, dragging a speaker on the
+  room plan, zooming a chart.
+- Release it: a `.desktop` file, then packaging on macOS and Windows; decide whether the
+  feature becomes the default.
+- Some time, just to see: the result screen in egui (`egui_plot` has zoom and readouts under
+  the cursor built in). Its immediate mode fits how the UI already draws from the app's
+  state each frame; it would look less like a terminal.
+
 ## Done
 
 - **Platform layer** (`src/platform/`): the first step towards other operating systems,

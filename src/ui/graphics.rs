@@ -50,6 +50,22 @@ pub struct Graphics {
     offscreen: Option<(u16, u16)>,
     /// Charts drawn offscreen since [`Self::take_captured`]: where, and the image.
     captured: Vec<(Rect, image::DynamicImage)>,
+    /// Charts drawn on the GPU, in the window.
+    #[cfg(feature = "window")]
+    window: Option<WindowCharts>,
+}
+
+/// The window's charts: recorded for the GPU, each again only when what it shows changes.
+#[cfg(feature = "window")]
+struct WindowCharts {
+    /// Cell size in pixels.
+    cell: (u16, u16),
+    /// The labels' font, for the GPU.
+    font: Option<vello::peniko::FontData>,
+    /// Per chart slot: the hash of what it shows (content and size), and its drawing.
+    scenes: HashMap<String, (u64, std::sync::Arc<vello::Scene>)>,
+    /// The charts of the frame being drawn: where, and the drawing.
+    placed: Vec<(Rect, std::sync::Arc<vello::Scene>)>,
 }
 
 impl std::fmt::Debug for Graphics {
@@ -75,6 +91,8 @@ impl Graphics {
             next_id: first_image_id(),
             offscreen: None,
             captured: Vec::new(),
+            #[cfg(feature = "window")]
+            window: None,
         }
     }
 
@@ -92,6 +110,8 @@ impl Graphics {
             next_id: first_image_id(),
             offscreen: Some(cell),
             captured: Vec::new(),
+            #[cfg(feature = "window")]
+            window: None,
         }
     }
 
@@ -115,7 +135,53 @@ impl Graphics {
             next_id: first_image_id(),
             offscreen: None,
             captured: Vec::new(),
+            #[cfg(feature = "window")]
+            window: None,
         }
+    }
+
+    /// Charts drawn on the GPU in a window whose cells are `cell` pixels large, with the
+    /// font in `font_bytes` for labels (see [`Self::take_placed`]).
+    #[cfg(feature = "window")]
+    #[must_use]
+    pub fn window(theme: Theme, font_bytes: Option<Vec<u8>>, cell: (u16, u16)) -> Self {
+        let data = font_bytes
+            .as_ref()
+            .map(|b| vello::peniko::FontData::new(vello::peniko::Blob::from(b.clone()), 0));
+        Self {
+            picker: None,
+            theme,
+            font: font_bytes.and_then(raster::font_from),
+            cache: HashMap::new(),
+            drawn: HashSet::new(),
+            compress: false,
+            next_id: first_image_id(),
+            offscreen: None,
+            captured: Vec::new(),
+            window: Some(WindowCharts {
+                cell,
+                font: data,
+                scenes: HashMap::new(),
+                placed: Vec::new(),
+            }),
+        }
+    }
+
+    /// The window's cell size changed (its text was zoomed or it moved to another screen).
+    #[cfg(feature = "window")]
+    pub fn set_cell_size(&mut self, cell: (u16, u16)) {
+        if let Some(w) = &mut self.window {
+            w.cell = cell;
+        }
+    }
+
+    /// The window's charts drawn since the last call: their areas in cells, and drawings.
+    #[cfg(feature = "window")]
+    pub fn take_placed(&mut self) -> Vec<(Rect, std::sync::Arc<vello::Scene>)> {
+        self.window
+            .as_mut()
+            .map(|w| std::mem::take(&mut w.placed))
+            .unwrap_or_default()
     }
 
     /// The charts drawn offscreen since the last call, with their areas in cells.
@@ -158,12 +224,18 @@ impl Graphics {
             next_id: first_image_id(),
             offscreen: None,
             captured: Vec::new(),
+            #[cfg(feature = "window")]
+            window: None,
         }
     }
 
     /// True when charts are drawn as images.
     #[must_use]
     pub fn images(&self) -> bool {
+        #[cfg(feature = "window")]
+        if self.window.is_some() {
+            return true;
+        }
         self.picker.is_some() || self.offscreen.is_some()
     }
 
@@ -204,6 +276,11 @@ impl Graphics {
     pub fn begin_frame(&mut self) {
         let drawn = std::mem::take(&mut self.drawn);
         self.cache.retain(|slot, _| drawn.contains(slot));
+        #[cfg(feature = "window")]
+        if let Some(w) = &mut self.window {
+            w.scenes.retain(|slot, _| drawn.contains(slot));
+            w.placed.clear();
+        }
     }
 
     /// Shows the chart `slot` in `area`. `content` identifies what it shows; the image is
@@ -217,6 +294,31 @@ impl Graphics {
         render: impl FnOnce(&mut Canvas, &Theme, Option<&FontVec>),
     ) {
         if area.width == 0 || area.height == 0 {
+            return;
+        }
+        #[cfg(feature = "window")]
+        if let Some(w) = &mut self.window {
+            self.drawn.insert(slot.to_owned());
+            let (cw, ch) = w.cell;
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            (content, area.width, area.height, cw, ch).hash(&mut hasher);
+            let key = hasher.finish();
+            if w.scenes.get(slot).is_none_or(|(k, _)| *k != key) {
+                let mut canvas = Canvas::scene(
+                    u32::from(area.width) * u32::from(cw),
+                    u32::from(area.height) * u32::from(ch),
+                    self.theme.background,
+                    f32::from(cw),
+                    w.font.clone(),
+                );
+                render(&mut canvas, &self.theme, self.font.as_ref());
+                let scene = canvas.into_scene().unwrap_or_default();
+                w.scenes
+                    .insert(slot.to_owned(), (key, std::sync::Arc::new(scene)));
+            }
+            if let Some((_, scene)) = w.scenes.get(slot) {
+                w.placed.push((area, std::sync::Arc::clone(scene)));
+            }
             return;
         }
         if let Some((cw, ch)) = self.offscreen {
