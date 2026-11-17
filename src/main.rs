@@ -194,7 +194,9 @@ fn pick_session(arg: Option<&str>) -> Result<PathBuf> {
 fn wizard(options: Options, screen: Screen) -> Result<()> {
     #[cfg(not(feature = "window"))]
     if screen == Screen::Window {
-        bail!("this build has no window; build it with: cargo install --path . --features window");
+        bail!(
+            "this build has no window; build it with: cargo install --locked --path . --features window"
+        );
     }
     // Restore the system on SIGTERM / SIGHUP / SIGINT (raw mode turns Ctrl-C into a key).
     let signalled = Arc::new(AtomicBool::new(false));

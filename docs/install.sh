@@ -17,7 +17,7 @@ case "$(uname -s)-$(uname -m)" in
     Darwin-x86_64) target=x86_64-apple-darwin ;;
     *)
         echo "There is no ready-made CorrectSound for $(uname -s) on $(uname -m) yet." >&2
-        echo "Install Rust (https://rustup.rs), then: cargo install --git https://github.com/$repo" >&2
+        echo "Install Rust (https://rustup.rs), then: cargo install --locked --git https://github.com/$repo" >&2
         exit 1
         ;;
 esac

@@ -924,12 +924,12 @@ and how you would test it on the simulator. Wait for my go-ahead before writing 
     <p style="margin-top:14px"><b>On Windows</b>, download <code>correctsound-x86_64-pc-windows-msvc.zip</code> from the <a href="https://github.com/arturzielazny/correctsound/releases/latest">latest release</a> and run <code>correctsound.exe --simulate</code> in a terminal. Every download is also on that page, if you prefer to <a href="https://arturzielazny.github.io/correctsound/install.sh">read the script</a> first and do it by hand.</p>
     <p><b>To measure on Linux</b> you also need PipeWire with WirePlumber and <code>alsa-utils</code>, on any distribution. EasyEffects is optional: without it you still get the filter files. Any terminal works; Ghostty, kitty, WezTerm and foot show the charts as images, others draw them with braille dots. Or skip the terminal: <code>--window</code> opens it in a window of its own.</p>
     <details class="prompt" style="margin-top:14px"><summary>From source, to change it (needs Rust)</summary><div class="body">
-    <p>With <a href="https://rustup.rs">Rust</a> installed, straight from GitHub (add <code>--features window</code> for the window):</p>
-    <div class="install small"><span class="prompt">$</span><code class="cmd">cargo install --git https://github.com/arturzielazny/correctsound</code><button class="copy" type="button" data-copy="cargo install --git https://github.com/arturzielazny/correctsound">Copy</button></div>
+    <p>With <a href="https://rustup.rs">Rust</a> installed, straight from GitHub (add <code>--features window</code> for the window; <code>--locked</code> builds with the versions the releases were tested with):</p>
+    <div class="install small"><span class="prompt">$</span><code class="cmd">cargo install --locked --git https://github.com/arturzielazny/correctsound</code><button class="copy" type="button" data-copy="cargo install --locked --git https://github.com/arturzielazny/correctsound">Copy</button></div>
     <p style="margin-top:14px">Or from a clone:</p>
     <pre>git clone https://github.com/arturzielazny/correctsound
 cd correctsound
-cargo install --path . --features window</pre>
+cargo install --locked --path . --features window</pre>
     </div></details>
     <p style="margin-top:14px">Then:</p>
     <pre>correctsound --simulate      # a tour with a simulated room, no hardware (any OS)

@@ -25,7 +25,7 @@ correctsound --window      # in a window of its own, drawn on the GPU (experimen
 The script installs the ready-made program for Linux or macOS from the
 [latest release](https://github.com/arturzielazny/correctsound/releases/latest) into
 `~/.local/bin`; Windows has a zip there. From source, with Rust:
-`cargo install --git https://github.com/arturzielazny/correctsound --features window`.
+`cargo install --locked --git https://github.com/arturzielazny/correctsound --features window`.
 
 On Linux it needs PipeWire (`pw-cat`, `pw-dump`), WirePlumber (`wpctl`) and `alsa-utils`
 (`amixer`). EasyEffects is optional: without it you still get the EQ files. On macOS and Windows
