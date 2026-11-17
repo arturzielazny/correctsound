@@ -67,7 +67,14 @@ impl Gpu {
     #[must_use]
     pub fn name(&self) -> String {
         let info = self.adapter.get_info();
-        format!("{} ({:?})", info.name, info.backend)
+        format!("{} ({:?}, {:?})", info.name, info.backend, info.device_type)
+    }
+
+    /// True for a renderer in software, standing in where there is no GPU (as on build
+    /// servers).
+    #[must_use]
+    pub fn is_software(&self) -> bool {
+        self.adapter.get_info().device_type == wgpu::DeviceType::Cpu
     }
 
     /// The last frame drawn.

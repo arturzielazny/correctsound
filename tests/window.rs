@@ -3,8 +3,8 @@
 //!
 //! The same review as `tests/performance.rs`, in a window the size of a 5120 × 2160 monitor
 //! at twice the standard density. The work on the CPU (laying the screen out and recording
-//! what changed for the GPU) is timed against the yardstick, as there. Where a GPU is found,
-//! each frame is also drawn on it, timed (printed, not judged: GPUs differ too much) and
+//! what changed for the GPU) is timed against the yardstick, as there. Where a GPU is found
+//! (not a software renderer standing in for one), each frame is also drawn on it, timed (printed, not judged: GPUs differ too much) and
 //! checked for being more than an empty background. With `CORRECTSOUND_WINDOW_SHOTS` set to
 //! a directory, the frames are saved there as PNG files.
 //!
@@ -55,6 +55,12 @@ impl Window {
             }
         };
         let gpu = match Gpu::headless() {
+            // A software renderer stands in on build servers without a GPU; the Windows
+            // one crashed under vello there. Timing it would say nothing about a screen.
+            Ok(g) if g.is_software() => {
+                eprintln!("{:<44} {}: the CPU's part only", "GPU", g.name());
+                None
+            }
             Ok(g) => {
                 eprintln!("{:<44} {}", "GPU", g.name());
                 Some(g)

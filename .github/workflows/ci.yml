@@ -37,4 +37,4 @@ jobs:
       - name: Lint the window
         run: cargo clippy --all-targets --features window -- -D warnings
       - name: Test the window
-        run: cargo test --features window --lib --test window
+        run: cargo test --features window --lib --test window -- --nocapture
