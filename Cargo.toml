@@ -1,6 +1,6 @@
 [package]
 name = "correctsound"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "Room correction for Linux: measure speakers with a UMIK-1 and load the EQ into EasyEffects, in a terminal wizard"
 license = "MIT"

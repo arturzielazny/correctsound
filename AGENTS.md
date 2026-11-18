@@ -158,7 +158,11 @@ rebuild the web page (`./web/build.sh`, web/README.md) so the one on the website
 ## Releasing
 
 Users install ready-made binaries (`docs/install.sh`, the website's one-line install), so a
-release is what reaches them: raise `version` in Cargo.toml (and web/Cargo.toml), rebuild the web page, add the changes to "What's new"
+release is what reaches them. **Every push that changes the website (anything in `docs/`,
+which GitHub Pages publishes at once, the web version in `docs/try/` included) is a release**,
+so the page, the web version and the downloads always describe the same app: the minor
+version for new features, the patch version for fixes only. Wait for CI to pass on the
+commit before pushing its tag. To release: raise `version` in Cargo.toml (and web/Cargo.toml), rebuild the web page, add the changes to "What's new"
 in `docs/index.html`, commit, then tag and push the tag (`git tag v0.3.0 && git push origin
 v0.3.0`). `.github/workflows/release.yml` builds Linux (x86_64, ARM), macOS (Apple silicon,
 Intel) and Windows binaries, with the window, and publishes them as the latest release.

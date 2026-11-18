@@ -70,4 +70,4 @@ case ":$PATH:" in
 esac
 echo
 echo "Try it without any hardware:  correctsound --simulate"
-echo "In a window of its own:       correctsound --simulate --window"
+echo "In this terminal instead:     correctsound --simulate --tty"

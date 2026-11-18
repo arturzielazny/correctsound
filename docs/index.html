@@ -255,7 +255,7 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
     <dl class="changes">
       <dt>18 Nov 2026</dt>
       <dd><ul>
-        <li>The window is becoming the default: from source now, and in the ready-made program from the next release, <code>correctsound</code> opens in a window of its own. <code>--tty</code> keeps it in the terminal, and it stays there by itself where no window can be opened (no display or GPU, or a login over SSH). The single mic positions behind the measured average are now a faint haze instead of lines.</li>
+        <li><b>Version 0.3.0.</b> The window is the default: <code>correctsound</code> opens in a window of its own. <code>--tty</code> keeps it in the terminal, and it stays there by itself where no window can be opened (no display or GPU, or a login over SSH). The single mic positions behind the measured average are now a faint haze instead of lines.</li>
       </ul></dd>
       <dt>17 Nov 2026</dt>
       <dd><ul>
@@ -928,7 +928,7 @@ and how you would test it on the simulator. Wait for my go-ahead before writing 
     <p><b>On Linux and macOS</b>, one line installs the ready-made program (no Rust, nothing to compile), checked against its published checksum, into <code>~/.local/bin</code>. Run it again to update.</p>
     <div class="install small"><span class="prompt">$</span><code class="cmd">curl -fsSL https://arturzielazny.github.io/correctsound/install.sh | sh</code><button class="copy" type="button" data-copy="curl -fsSL https://arturzielazny.github.io/correctsound/install.sh | sh">Copy</button></div>
     <p style="margin-top:14px"><b>On Windows</b>, download <code>correctsound-x86_64-pc-windows-msvc.zip</code> from the <a href="https://github.com/arturzielazny/correctsound/releases/latest">latest release</a> and run <code>correctsound.exe --simulate</code> in a terminal. Every download is also on that page, if you prefer to <a href="https://arturzielazny.github.io/correctsound/install.sh">read the script</a> first and do it by hand.</p>
-    <p><b>To measure on Linux</b> you also need PipeWire with WirePlumber and <code>alsa-utils</code>, on any distribution. EasyEffects is optional: without it you still get the filter files. Any terminal works; Ghostty, kitty, WezTerm and foot show the charts as images, others draw them with braille dots. From source (and from the next release) it opens in a window of its own; <code>--tty</code> keeps it in the terminal.</p>
+    <p><b>To measure on Linux</b> you also need PipeWire with WirePlumber and <code>alsa-utils</code>, on any distribution. EasyEffects is optional: without it you still get the filter files. Any terminal works; Ghostty, kitty, WezTerm and foot show the charts as images, others draw them with braille dots. It opens in a window of its own; <code>--tty</code> keeps it in the terminal, and it stays there by itself over SSH or without a display.</p>
     <details class="prompt" style="margin-top:14px"><summary>From source, to change it (needs Rust)</summary><div class="body">
     <p>With <a href="https://rustup.rs">Rust</a> installed, straight from GitHub (<code>--locked</code> builds with the versions the releases were tested with):</p>
     <div class="install small"><span class="prompt">$</span><code class="cmd">cargo install --locked --git https://github.com/arturzielazny/correctsound</code><button class="copy" type="button" data-copy="cargo install --locked --git https://github.com/arturzielazny/correctsound">Copy</button></div>
