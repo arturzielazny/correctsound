@@ -118,8 +118,8 @@ impl Series {
             Self::Boost => Color::Green,
             Self::Eq => Color::White,
             Self::Reference => Color::Gray,
-            Self::Position(Channel::Left) => Color::Yellow,
-            Self::Position(Channel::Right) => Color::LightBlue,
+            // Braille has no faint colours: grey, so the averages stand out.
+            Self::Position(_) => Color::DarkGray,
             Self::Slice(k) => [
                 Color::Red,
                 Color::LightRed,
@@ -163,8 +163,9 @@ impl Series {
             // Solid and as wide as the latest curve, so it reads at a glance, but dimmer
             // and drawn first, so the latest stays on top.
             Self::Reference => Pen::solid(color, 0.55, width * 1.3),
-            // Faint and thin: the spread between positions, not lines to read one by one.
-            Self::Position(_) => Pen::solid(color, 0.35, width * 0.7),
+            // Barely there: the spread between positions as a haze around the average, not
+            // lines to read one by one.
+            Self::Position(_) => Pen::solid(color, 0.16, width * 0.45),
             Self::Slice(_) => Pen::solid(color, 0.95, width * 0.9),
         }
     }

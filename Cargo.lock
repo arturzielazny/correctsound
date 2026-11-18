@@ -593,8 +593,21 @@ dependencies = [
  "toml",
  "ureq",
  "vello",
+ "web-time",
  "wgpu",
  "winit",
+]
+
+[[package]]
+name = "correctsound-web"
+version = "0.2.0"
+dependencies = [
+ "ab_glyph",
+ "correctsound",
+ "image",
+ "ratatui",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]

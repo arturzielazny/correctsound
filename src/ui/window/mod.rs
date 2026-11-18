@@ -166,13 +166,21 @@ fn grid_size(size: (u32, u32), m: &Metrics) -> (u16, u16) {
     (fit(size.0, m.cell_w), fit(size.1, m.cell_h))
 }
 
+/// The window could not be opened at all (no display, or no GPU to draw with), so nothing
+/// was shown in it yet: the terminal can stand in.
+#[derive(Debug, thiserror::Error)]
+#[error("{0:#}")]
+pub struct Unavailable(anyhow::Error);
+
 /// Runs the app in a window until it quits, the window is closed or `signalled` is set.
 ///
 /// # Errors
 ///
-/// When the window or the GPU cannot be started.
+/// When the window or the GPU cannot be started ([`Unavailable`]), or stop working.
 pub fn run(app: &mut App, signalled: Arc<AtomicBool>) -> Result<()> {
-    let event_loop = EventLoop::new().context("opening a window")?;
+    let event_loop = EventLoop::new()
+        .context("opening a window")
+        .map_err(Unavailable)?;
     let mut runner = Runner {
         app,
         signalled,
@@ -354,7 +362,7 @@ impl ApplicationHandler for Runner<'_> {
                 live.window.request_redraw();
                 self.live = Some(live);
             }
-            Err(e) => self.fail(event_loop, e),
+            Err(e) => self.fail(event_loop, Unavailable(e).into()),
         }
     }
 

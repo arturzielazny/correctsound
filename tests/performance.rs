@@ -18,9 +18,9 @@ mod common;
 use std::time::{Duration, Instant};
 
 use common::{measured_session, ms, press, settle, tick_until, within, yardstick};
+use correctsound::app::keys::KeyCode;
 use correctsound::app::{App, Options, Overlay, Step};
 use correctsound::ui::graphics::Graphics;
-use crossterm::event::KeyCode;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui_image::picker::ProtocolType;

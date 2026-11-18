@@ -17,11 +17,11 @@ mod common;
 use std::time::{Duration, Instant};
 
 use common::{measured_session, ms, press, settle, tick_until, within, yardstick};
+use correctsound::app::keys::KeyCode;
 use correctsound::app::{App, Options, Overlay, Step};
 use correctsound::ui::theme::Theme;
 use correctsound::ui::window::Screen;
 use correctsound::ui::window::gpu::Gpu;
-use crossterm::event::KeyCode;
 
 /// A 5120 × 2160 window at twice the standard density, with 9-point text: about the 360 ×
 /// 68 cells of the terminal in `tests/performance.rs`.

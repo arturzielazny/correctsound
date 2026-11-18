@@ -377,13 +377,10 @@ impl Model {
             }
             values
         };
-        let values: Vec<f64> = std::thread::scope(|scope| {
-            let handles: Vec<_> = (0..ny).map(|iy| scope.spawn(move || row(iy))).collect();
-            handles
-                .into_iter()
-                .flat_map(|h| h.join().expect("seat map threads do not panic"))
-                .collect()
-        });
+        let values: Vec<f64> = crate::background::map((0..ny).collect(), row)
+            .into_iter()
+            .flatten()
+            .collect();
         SeatMap {
             nx,
             ny,
@@ -876,20 +873,12 @@ pub fn guess(
 ) -> Vec<Guess> {
     // Each candidate room's layout search is independent: all at once.
     let rooms = guess_rooms(heard, CANDIDATE_ROOMS);
-    let mut found: Vec<Guess> = std::thread::scope(|scope| {
-        let handles: Vec<_> = rooms
-            .into_iter()
-            .map(|room| {
-                scope.spawn(move || {
-                    guess_setup(room, evidence, &Model::new(room, modes, typical_t60_s))
-                })
-            })
-            .collect();
-        handles
-            .into_iter()
-            .filter_map(|h| h.join().expect("guess threads do not panic"))
-            .collect()
-    });
+    let mut found: Vec<Guess> = crate::background::map(rooms, |room| {
+        guess_setup(room, evidence, &Model::new(room, modes, typical_t60_s))
+    })
+    .into_iter()
+    .flatten()
+    .collect();
     found.sort_by(|a, b| a.score().total_cmp(&b.score()));
     found
 }
@@ -965,27 +954,19 @@ pub fn guess_setup(room: Room, evidence: Evidence<'_>, model: &Model) -> Option<
     // Every distance from the wall on its own thread; the best of each, in order, so the
     // result is the one a scan in that order finds.
     let in_parallel = |rows: Vec<f64>, per_row: &(dyn Fn(f64, &mut Option<Guess>) + Sync)| {
-        std::thread::scope(|scope| {
-            let handles: Vec<_> = rows
-                .into_iter()
-                .map(|x| {
-                    scope.spawn(move || {
-                        let mut best = None;
-                        per_row(x, &mut best);
-                        best
-                    })
-                })
-                .collect();
-            handles
-                .into_iter()
-                .filter_map(|h| h.join().expect("guess threads do not panic"))
-                .fold(None, |best: Option<Guess>, g| {
-                    if best.as_ref().is_none_or(|b| g.score() < b.score()) {
-                        Some(g)
-                    } else {
-                        best
-                    }
-                })
+        crate::background::map(rows, |x| {
+            let mut best = None;
+            per_row(x, &mut best);
+            best
+        })
+        .into_iter()
+        .flatten()
+        .fold(None, |best: Option<Guess>, g| {
+            if best.as_ref().is_none_or(|b| g.score() < b.score()) {
+                Some(g)
+            } else {
+                best
+            }
         })
     };
     let best = in_parallel(

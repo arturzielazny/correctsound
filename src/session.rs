@@ -1,6 +1,6 @@
 //! The on-disk session directory: recordings, responses, settings and outputs.
 
-use std::fs;
+use crate::files as fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -184,13 +184,13 @@ pub fn write_wav(path: &Path, samples: &[f32]) -> Result<()> {
         bits_per_sample: 32,
         sample_format: hound::SampleFormat::Float,
     };
-    let mut w = hound::WavWriter::create(path, spec)
-        .with_context(|| format!("creating {}", path.display()))?;
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    let mut w = hound::WavWriter::new(&mut bytes, spec)?;
     for &s in samples {
         w.write_sample(s)?;
     }
     w.finalize()?;
-    Ok(())
+    fs::write(path, bytes.into_inner()).with_context(|| format!("writing {}", path.display()))
 }
 
 /// Reads a mono float WAV written by [`write_wav`].
@@ -199,8 +199,9 @@ pub fn write_wav(path: &Path, samples: &[f32]) -> Result<()> {
 ///
 /// Fails on I/O or format errors.
 pub fn read_wav(path: &Path) -> Result<Vec<f32>> {
-    let mut r =
-        hound::WavReader::open(path).with_context(|| format!("opening {}", path.display()))?;
+    let bytes = fs::read(path).with_context(|| format!("opening {}", path.display()))?;
+    let mut r = hound::WavReader::new(std::io::Cursor::new(bytes))
+        .with_context(|| format!("reading {}", path.display()))?;
     r.samples::<f32>()
         .collect::<Result<Vec<f32>, _>>()
         .with_context(|| format!("reading {}", path.display()))

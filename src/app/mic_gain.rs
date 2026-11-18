@@ -1,7 +1,6 @@
 //! Step 3: setting the mic's input gain to the unity its calibration assumes.
 
-use crossterm::event::KeyCode;
-
+use super::keys::KeyCode;
 use super::{App, Step};
 use crate::platform::InputGain;
 

@@ -27,14 +27,36 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Format
         if: runner.os == 'Linux'
-        run: cargo fmt --check
+        run: cargo fmt --all --check
+      # With the window (the default). Without a GPU on the runner, the window's test times
+      # the CPU's part only.
       - name: Lint
         run: cargo clippy --all-targets -- -D warnings
       - name: Test
         run: cargo test
-      # The window (--window) is optional while it is an experiment, but kept building and
-      # drawing on every OS. Without a GPU on the runner, its test times the CPU's part only.
-      - name: Lint the window
-        run: cargo clippy --all-targets --features window -- -D warnings
-      - name: Test the window
-        run: cargo test --features window --lib --test window -- --nocapture
+      - name: The window's times
+        run: cargo test --test window -- --nocapture
+      # A build without the window (--no-default-features), for the terminal only.
+      - name: Lint without the window
+        run: cargo clippy --all-targets --no-default-features -- -D warnings
+      - name: Test without the window
+        run: cargo test --no-default-features --lib
+
+  # The web page (docs/try/): the library and the page's program built for WebAssembly.
+  web:
+    name: web page
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.130
+      - name: Lint
+        run: cargo clippy -p correctsound-web --target wasm32-unknown-unknown -- -D warnings
+      - name: Build
+        run: ./web/build.sh

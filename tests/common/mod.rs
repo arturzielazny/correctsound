@@ -6,11 +6,11 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use correctsound::app::keys::{KeyCode, KeyEvent, KeyModifiers};
 use correctsound::app::{App, LevelPhase, Options, Step};
 use correctsound::audio::sim::{SimConfig, SimState};
 use correctsound::ui::raster::{Canvas, Pen};
 use correctsound::ui::theme::Rgb;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 /// A fixed piece of drawing, timed on this machine, ms (about 40 on a current desktop in the
 /// test build): a chart-sized canvas filled, gridded and drawn with long curves, the kind of

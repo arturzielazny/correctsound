@@ -7,10 +7,12 @@
 pub mod analysis;
 pub mod app;
 pub mod audio;
+pub mod background;
 pub mod cal;
 pub mod config;
 pub mod dsp;
 pub mod eq;
+pub mod files;
 pub mod insights;
 pub mod paths;
 pub mod platform;

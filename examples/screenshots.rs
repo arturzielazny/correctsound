@@ -13,11 +13,11 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use ab_glyph::{Font, FontVec, PxScale, ScaleFont};
+use correctsound::app::keys::{KeyCode, KeyEvent, KeyModifiers};
 use correctsound::app::{App, LevelPhase, Options, Overlay, Step};
 use correctsound::ui::graphics::Graphics;
 use correctsound::ui::raster::{Canvas, Pen};
 use correctsound::ui::theme::{Rgb, Theme};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::style::{Color, Modifier};

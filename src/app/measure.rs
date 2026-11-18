@@ -2,11 +2,12 @@
 //! step's keys, and the session's settings saved with each measurement.
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{Result, anyhow};
-use crossterm::event::KeyCode;
+use web_time::Instant;
 
+use super::keys::KeyCode;
 use super::{App, Step};
 use crate::analysis::{Responses, responses};
 use crate::audio::{AudioBackend, Channel, Program, Route, Source, Stream};

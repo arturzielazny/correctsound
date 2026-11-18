@@ -1,10 +1,10 @@
 //! Step 1: finding the mic and the outputs, and choosing the output the speakers are on.
 
-use std::time::Instant;
+use web_time::Instant;
 
 use anyhow::{Result, anyhow};
-use crossterm::event::KeyCode;
 
+use super::keys::KeyCode;
 use super::{App, Step};
 use crate::cal;
 use crate::platform::Device;

@@ -5,8 +5,8 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use crossterm::event::KeyCode;
 
+use super::keys::KeyCode;
 use super::{App, Step};
 use crate::audio::{AudioBackend, Channel, Program, Route, Source, Stream};
 use crate::cal::Calibration;

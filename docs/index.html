@@ -234,6 +234,7 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
     <p class="lede">CorrectSound measures what actually reaches your ears, designs an equalizer that evens it out, loads it into EasyEffects and checks that it worked. One terminal wizard, about five minutes, no spreadsheets of filter values.</p>
     <div class="cta">
       <a class="btn primary" href="https://github.com/arturzielazny/correctsound">Get it on GitHub</a>
+      <a class="btn" href="try/">Try it in your browser</a>
       <a class="btn" href="#tour">Take the tour</a>
       <a class="btn" href="#yours">Make it yours with your AI agent</a>
     </div>
@@ -252,8 +253,13 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
     <div class="eyebrow">What's new</div>
     <h2>Recent changes</h2>
     <dl class="changes">
+      <dt>18 Nov 2026</dt>
+      <dd><ul>
+        <li>The window is becoming the default: from source now, and in the ready-made program from the next release, <code>correctsound</code> opens in a window of its own. <code>--tty</code> keeps it in the terminal, and it stays there by itself where no window can be opened (no display or GPU, or a login over SSH). The single mic positions behind the measured average are now a faint haze instead of lines.</li>
+      </ul></dd>
       <dt>17 Nov 2026</dt>
       <dd><ul>
+        <li id="try" style="scroll-margin-top:80px"><a href="try/">Try it in your browser</a>: the whole wizard against the simulated room, with the screens and keys of the terminal, nothing to install. It is the same Rust compiled to WebAssembly and drawn on a canvas; nothing is played or recorded. Measuring real speakers in the browser comes next.</li>
         <li><b>Version 0.2.0.</b> A ready-made program for Linux, macOS and Windows, so there is no Rust to install and nothing to compile: <a href="#install">one line</a> installs it on Linux and macOS.</li>
         <li id="window" style="scroll-margin-top:80px">An experimental window: <code>correctsound --window</code> shows the same screens and keys in a window of its own, drawn on the GPU (all Rust: vello on wgpu, for Vulkan, Metal and DirectX). On a 5K monitor a chart update takes 2–3 ms of processor time instead of 40, and the terminal no longer has images to decode. The ready-made program includes it; <kbd>Ctrl</kbd> with <kbd>+</kbd>, <kbd>−</kbd> or <kbd>0</kbd> sizes the text. The terminal stays as it is.</li>
         <li>Instant on large screens: charts go to the terminal compressed (1 MB instead of 48 MB per change on a 5K monitor), the EQ is worked out in the background and four times faster, and the room screen is ready before you open it.</li>
@@ -922,21 +928,21 @@ and how you would test it on the simulator. Wait for my go-ahead before writing 
     <p><b>On Linux and macOS</b>, one line installs the ready-made program (no Rust, nothing to compile), checked against its published checksum, into <code>~/.local/bin</code>. Run it again to update.</p>
     <div class="install small"><span class="prompt">$</span><code class="cmd">curl -fsSL https://arturzielazny.github.io/correctsound/install.sh | sh</code><button class="copy" type="button" data-copy="curl -fsSL https://arturzielazny.github.io/correctsound/install.sh | sh">Copy</button></div>
     <p style="margin-top:14px"><b>On Windows</b>, download <code>correctsound-x86_64-pc-windows-msvc.zip</code> from the <a href="https://github.com/arturzielazny/correctsound/releases/latest">latest release</a> and run <code>correctsound.exe --simulate</code> in a terminal. Every download is also on that page, if you prefer to <a href="https://arturzielazny.github.io/correctsound/install.sh">read the script</a> first and do it by hand.</p>
-    <p><b>To measure on Linux</b> you also need PipeWire with WirePlumber and <code>alsa-utils</code>, on any distribution. EasyEffects is optional: without it you still get the filter files. Any terminal works; Ghostty, kitty, WezTerm and foot show the charts as images, others draw them with braille dots. Or skip the terminal: <code>--window</code> opens it in a window of its own.</p>
+    <p><b>To measure on Linux</b> you also need PipeWire with WirePlumber and <code>alsa-utils</code>, on any distribution. EasyEffects is optional: without it you still get the filter files. Any terminal works; Ghostty, kitty, WezTerm and foot show the charts as images, others draw them with braille dots. From source (and from the next release) it opens in a window of its own; <code>--tty</code> keeps it in the terminal.</p>
     <details class="prompt" style="margin-top:14px"><summary>From source, to change it (needs Rust)</summary><div class="body">
-    <p>With <a href="https://rustup.rs">Rust</a> installed, straight from GitHub (add <code>--features window</code> for the window; <code>--locked</code> builds with the versions the releases were tested with):</p>
+    <p>With <a href="https://rustup.rs">Rust</a> installed, straight from GitHub (<code>--locked</code> builds with the versions the releases were tested with):</p>
     <div class="install small"><span class="prompt">$</span><code class="cmd">cargo install --locked --git https://github.com/arturzielazny/correctsound</code><button class="copy" type="button" data-copy="cargo install --locked --git https://github.com/arturzielazny/correctsound">Copy</button></div>
     <p style="margin-top:14px">Or from a clone:</p>
     <pre>git clone https://github.com/arturzielazny/correctsound
 cd correctsound
-cargo install --locked --path . --features window</pre>
+cargo install --locked --path .</pre>
     </div></details>
     <p style="margin-top:14px">Then:</p>
     <pre>correctsound --simulate      # a tour with a simulated room, no hardware (any OS)
 correctsound                 # the real thing, on Linux: plug in the UMIK-1 first
 correctsound sessions        # your saved measurements
 correctsound review          # open the newest again, re-analysed, nothing played
-correctsound --window        # in a window of its own, drawn on the GPU (experimental)</pre>
+correctsound --window        # in a window of its own, drawn on the GPU</pre>
     <table style="margin-top:26px">
       <tr><th>Key</th><th>Where</th><th>Does</th></tr>
       <tr><td><kbd>Enter</kbd></td><td>everywhere</td><td>the screen's main action</td></tr>

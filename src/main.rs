@@ -9,7 +9,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use crossterm::event::{self, Event, KeyEventKind};
 
-use correctsound::app::{App, Options};
+use correctsound::app::{App, Options, keys};
 use correctsound::audio::Channel;
 use correctsound::dsp::level::SplScale;
 use correctsound::dsp::sweep::{IrWindow, Sweep, SweepAnalysis, SweepParams};
@@ -44,8 +44,12 @@ struct Cli {
     /// dB added to mic dBFS readings to get dB SPL (default: 124 − sensitivity factor).
     #[arg(long, value_name = "DB", allow_hyphen_values = true)]
     spl_offset: Option<f64>,
-    /// Open in a window of its own, drawn on the GPU, instead of the terminal (experimental;
-    /// needs a build with `--features window`).
+    /// Show it in this terminal instead of a window of its own (chosen by itself where no
+    /// window can be opened: no display, no GPU, or a login over SSH).
+    #[arg(long, global = true, conflicts_with = "window")]
+    tty: bool,
+    /// Show it in a window of its own, drawn on the GPU (the default), and fail instead of
+    /// falling back to the terminal when it cannot be opened.
     #[arg(long, global = true)]
     window: bool,
 }
@@ -54,7 +58,33 @@ struct Cli {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Screen {
     Terminal,
+    /// The window, or nothing: asked for with `--window`.
     Window,
+    /// The window where one can be opened, else the terminal: the default.
+    WindowOrTerminal,
+}
+
+impl Screen {
+    fn chosen(cli: &Cli) -> Self {
+        if cli.tty {
+            Self::Terminal
+        } else if cli.window {
+            Self::Window
+        } else if !cfg!(feature = "window") || over_ssh() {
+            // A window would open on the computer in front of the user only by chance (X
+            // forwarding), and slowly: the terminal they typed in is where they look.
+            Self::Terminal
+        } else {
+            Self::WindowOrTerminal
+        }
+    }
+}
+
+/// True when run from a login over SSH (OpenSSH sets these on every system).
+fn over_ssh() -> bool {
+    ["SSH_CONNECTION", "SSH_TTY"]
+        .iter()
+        .any(|v| std::env::var_os(v).is_some())
 }
 
 #[derive(Debug, Subcommand)]
@@ -92,11 +122,7 @@ enum Command {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let screen = if cli.window {
-        Screen::Window
-    } else {
-        Screen::Terminal
-    };
+    let screen = Screen::chosen(&cli);
     match cli.command {
         Some(Command::Devices) => devices(),
         Some(Command::Sessions) => {
@@ -212,16 +238,11 @@ fn wizard(options: Options, screen: Screen) -> Result<()> {
         signal_hook::flag::register(sig, Arc::clone(&signalled))
             .context("installing signal handler")?;
     }
-    spawn_watchdog(Arc::clone(&signalled), screen);
-    let mut terminal = (screen == Screen::Terminal).then(ratatui::init);
-    // Charts as images where the terminal can show them (asks the terminal, in raw mode,
-    // before the loop below starts reading keys).
-    let mut gfx = if terminal.is_some() {
-        Graphics::detect()
-    } else {
-        Graphics::text_only()
-    };
-    // ratatui's hook restores the terminal; ours also restores the system first.
+    // Set once the terminal shows the wizard: the watchdog then also watches the terminal.
+    let in_terminal = Arc::new(AtomicBool::new(false));
+    spawn_watchdog(Arc::clone(&signalled), Arc::clone(&in_terminal));
+    // Ours restores the system; ratatui's, added when the terminal starts, restores the
+    // terminal first.
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         restore::run_all();
@@ -229,38 +250,41 @@ fn wizard(options: Options, screen: Screen) -> Result<()> {
     }));
 
     let mut app = App::new(options);
-    let result = match &mut terminal {
-        Some(terminal) => (|| -> Result<()> {
-            while !app.quit && !signalled.load(Ordering::Relaxed) {
-                gfx.refresh_cell_size();
-                gfx.begin_frame();
-                terminal.draw(|f| correctsound::ui::draw(f, &app, &mut gfx))?;
-                // Every key already waiting is handled before the next frame: a quick run of
-                // presses is drawn once, at the end, instead of one frame behind the other.
-                let mut wait = Duration::from_millis(50);
-                while !app.quit && event::poll(wait)? {
-                    if let Event::Key(key) = event::read()?
-                        && key.kind == KeyEventKind::Press
-                    {
-                        app.handle_key(key);
-                    }
-                    wait = Duration::ZERO;
-                }
-                app.tick();
+    // The window first, unless the terminal was chosen; why it could not be opened, when the
+    // terminal is to stand in for it.
+    #[cfg(feature = "window")]
+    let (in_window, fell_back) = if screen == Screen::Terminal {
+        (Ok(()), None)
+    } else {
+        match correctsound::ui::window::run(&mut app, Arc::clone(&signalled)) {
+            Err(e)
+                if screen == Screen::WindowOrTerminal
+                    && e.is::<correctsound::ui::window::Unavailable>() =>
+            {
+                (Ok(()), Some(format!("{e:#}")))
             }
-            Ok(())
-        })(),
-        #[cfg(feature = "window")]
-        None => correctsound::ui::window::run(&mut app, Arc::clone(&signalled)),
-        #[cfg(not(feature = "window"))]
-        None => Ok(()),
+            ran => (ran, None),
+        }
+    };
+    #[cfg(not(feature = "window"))]
+    let (in_window, fell_back): (Result<()>, Option<String>) = (Ok(()), None);
+    let terminal = screen == Screen::Terminal || fell_back.is_some();
+    let result = if terminal {
+        in_terminal.store(true, Ordering::Relaxed);
+        in_the_terminal(&mut app, &signalled)
+    } else {
+        in_window
     };
     let session = app.session_dir();
     let undo = restore::pending();
     drop(app); // stops any audio
     restore::run_all();
-    if terminal.is_some() {
+    if terminal {
         ratatui::restore();
+    }
+    if let Some(why) = fell_back {
+        println!("No window could be opened, so the terminal showed it (--tty does so at once).");
+        println!("The window's error: {why}");
     }
     if !undo.is_empty() {
         println!("Restored: {}", undo.join(", "));
@@ -269,6 +293,68 @@ fn wizard(options: Options, screen: Screen) -> Result<()> {
         println!("Session saved in {}", dir.display());
     }
     result
+}
+
+/// Runs the app in this terminal until it quits or `signalled` is set.
+fn in_the_terminal(app: &mut App, signalled: &AtomicBool) -> Result<()> {
+    let mut terminal = ratatui::init();
+    // Charts as images where the terminal can show them (asks the terminal, in raw mode,
+    // before the loop below starts reading keys).
+    let mut gfx = Graphics::detect();
+    while !app.quit && !signalled.load(Ordering::Relaxed) {
+        gfx.refresh_cell_size();
+        gfx.begin_frame();
+        terminal.draw(|f| correctsound::ui::draw(f, app, &mut gfx))?;
+        // Every key already waiting is handled before the next frame: a quick run of
+        // presses is drawn once, at the end, instead of one frame behind the other.
+        let mut wait = Duration::from_millis(50);
+        while !app.quit && event::poll(wait)? {
+            if let Event::Key(key) = event::read()?
+                && key.kind == KeyEventKind::Press
+                && let Some(key) = app_key(key)
+            {
+                app.handle_key(key);
+            }
+            wait = Duration::ZERO;
+        }
+        app.tick();
+    }
+    Ok(())
+}
+
+/// The terminal's key as the app's; `None` for keys the app has no use for.
+fn app_key(key: event::KeyEvent) -> Option<keys::KeyEvent> {
+    use event::KeyCode as Term;
+    use keys::{KeyCode, KeyModifiers};
+    let code = match key.code {
+        Term::Char(c) => KeyCode::Char(c),
+        Term::Enter => KeyCode::Enter,
+        Term::Esc => KeyCode::Esc,
+        Term::Tab => KeyCode::Tab,
+        Term::BackTab => KeyCode::BackTab,
+        Term::Backspace => KeyCode::Backspace,
+        Term::Delete => KeyCode::Delete,
+        Term::Up => KeyCode::Up,
+        Term::Down => KeyCode::Down,
+        Term::Left => KeyCode::Left,
+        Term::Right => KeyCode::Right,
+        Term::PageUp => KeyCode::PageUp,
+        Term::PageDown => KeyCode::PageDown,
+        Term::Home => KeyCode::Home,
+        Term::End => KeyCode::End,
+        _ => return None,
+    };
+    let mut modifiers = KeyModifiers::NONE;
+    for (term, app) in [
+        (event::KeyModifiers::SHIFT, KeyModifiers::SHIFT),
+        (event::KeyModifiers::CONTROL, KeyModifiers::CONTROL),
+        (event::KeyModifiers::ALT, KeyModifiers::ALT),
+    ] {
+        if key.modifiers.contains(term) {
+            modifiers |= app;
+        }
+    }
+    Some(keys::KeyEvent::new(code, modifiers))
 }
 
 /// How often the watchdog looks at the terminal and the signal flag.
@@ -281,12 +367,13 @@ const SIGNAL_GRACE: Duration = Duration::from_secs(1);
 /// the system unrestored: crossterm's `event::read` retries the dead terminal's
 /// end-of-input forever, so the main loop never got to check the signal flag. A window
 /// needs no terminal (it may have been opened from an app launcher): only signals count.
-fn spawn_watchdog(signalled: Arc<AtomicBool>, screen: Screen) {
+fn spawn_watchdog(signalled: Arc<AtomicBool>, in_terminal: Arc<AtomicBool>) {
     std::thread::spawn(move || {
         let mut signal_seen: Option<std::time::Instant> = None;
         loop {
             std::thread::sleep(WATCHDOG_PERIOD);
-            let terminal_gone = screen == Screen::Terminal && terminal_gone();
+            let terminal = in_terminal.load(Ordering::Relaxed);
+            let terminal_gone = terminal && terminal_gone();
             if !terminal_gone {
                 if !signalled.load(Ordering::Relaxed) {
                     continue;
@@ -297,7 +384,7 @@ fn spawn_watchdog(signalled: Arc<AtomicBool>, screen: Screen) {
                 }
             }
             restore::run_all();
-            if !terminal_gone && screen == Screen::Terminal {
+            if !terminal_gone && terminal {
                 ratatui::restore();
             }
             // Children (pw-cat) end on their own: playback at the end of its input, capture

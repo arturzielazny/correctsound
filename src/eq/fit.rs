@@ -208,26 +208,26 @@ pub struct AutoChoice {
 /// each count on its own gives, at a sixth of the work.
 fn fit_all(p: &Problem<'_>) -> Vec<Vec<Filter>> {
     let seeded = seeds(p, AUTO_MAX_FILTERS);
-    let mut fits: Vec<Vec<Filter>> = std::thread::scope(|scope| {
-        let handles: Vec<_> = (1..=AUTO_MAX_FILTERS)
-            .map(|n| {
-                // Placing stops early when nothing is left worth correcting: every larger
-                // count starts from the last placement.
-                let start = seeded
-                    .get(n - 1)
-                    .or_else(|| seeded.last())
-                    .cloned()
-                    .unwrap_or_default();
-                scope.spawn(move || finish(p, start))
-            })
-            .collect();
-        handles
-            .into_iter()
-            .map(|h| h.join().expect("fit threads do not panic"))
-            .collect()
-    });
+    // Placing stops early when nothing is left worth correcting: every larger count starts
+    // from the last placement.
+    let starts: Vec<Vec<Filter>> = (1..=AUTO_MAX_FILTERS)
+        .map(|n| {
+            seeded
+                .get(n - 1)
+                .or_else(|| seeded.last())
+                .cloned()
+                .unwrap_or_default()
+        })
+        .collect();
+    let mut fits = crate::background::map(starts, |start| finish(p, start));
     fits.insert(0, Vec::new());
     fits
+}
+
+/// What a job of [`fit_auto`] works out: the fits for every filter count, or a fold's errors.
+enum Work {
+    Fits(Vec<Vec<Filter>>),
+    Errors(Vec<f64>),
 }
 
 /// Power average of responses in dB on a shared grid.
@@ -270,33 +270,38 @@ pub fn fit_auto(
     } else {
         0
     };
-    let (mut fits, fold_errors): (Vec<Vec<Filter>>, Vec<Vec<f64>>) = std::thread::scope(|scope| {
-        let fold_handles: Vec<_> = (0..folds)
-            .map(|held| {
-                scope.spawn(move || {
-                    let others: Vec<&Response> = positions
-                        .iter()
-                        .enumerate()
-                        .filter(|(i, _)| *i != held)
-                        .map(|(_, r)| r)
-                        .collect();
-                    let training = power_mean(&others);
-                    let fold_fits = fit_all(&problem(&training, target));
-                    let test = problem(&positions[held], target);
-                    fold_fits
-                        .iter()
-                        .map(|f| test.rms(&response_db(f, test.freqs)))
-                        .collect::<Vec<f64>>()
-                })
-            })
-            .collect();
-        let fits = fit_all(&p);
-        let errors = fold_handles
-            .into_iter()
-            .map(|h| h.join().expect("fit threads do not panic"))
-            .collect();
-        (fits, errors)
-    });
+    // The fit itself (`None`) and each held-out position's fold, side by side.
+    let jobs: Vec<Option<usize>> = std::iter::once(None).chain((0..folds).map(Some)).collect();
+    let mut done = crate::background::map(jobs, |job| match job {
+        None => Work::Fits(fit_all(&p)),
+        Some(held) => {
+            let others: Vec<&Response> = positions
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != held)
+                .map(|(_, r)| r)
+                .collect();
+            let training = power_mean(&others);
+            let fold_fits = fit_all(&problem(&training, target));
+            let test = problem(&positions[held], target);
+            Work::Errors(
+                fold_fits
+                    .iter()
+                    .map(|f| test.rms(&response_db(f, test.freqs)))
+                    .collect(),
+            )
+        }
+    })
+    .into_iter();
+    let Some(Work::Fits(mut fits)) = done.next() else {
+        panic!("the first job is the fit itself");
+    };
+    let fold_errors: Vec<Vec<f64>> = done
+        .filter_map(|w| match w {
+            Work::Errors(e) => Some(e),
+            Work::Fits(_) => None,
+        })
+        .collect();
     let training_error: Vec<f64> = fits
         .iter()
         .map(|f| p.rms(&response_db(f, p.freqs)))
@@ -668,20 +673,19 @@ pub fn design_with_positions(
     options: &DesignOptions,
 ) -> Design {
     let targets: [Target; 2] = [0, 1].map(|c| Target::for_response(fit_resp[c], options));
-    let fitted: [(Vec<Filter>, Option<AutoChoice>); 2] = std::thread::scope(|scope| {
-        let handles = [0, 1].map(|c| {
-            let target = &targets[c];
-            scope.spawn(move || match options.max_filters {
-                Some(n) => (fit(fit_resp[c], target, n), None),
-                None => {
-                    let (filters, choice) = fit_auto(fit_resp[c], target, positions[c]);
-                    (filters, Some(choice))
-                }
-            })
-        });
-        handles.map(|h| h.join().expect("fit threads do not panic"))
+    let fitted = crate::background::map(vec![0, 1], |c: usize| {
+        let target = &targets[c];
+        match options.max_filters {
+            Some(n) => (fit(fit_resp[c], target, n), None),
+            None => {
+                let (filters, choice) = fit_auto(fit_resp[c], target, positions[c]);
+                (filters, Some(choice))
+            }
+        }
     });
-    let [(filters_l, auto_l), (filters_r, auto_r)] = fitted;
+    let [(filters_l, auto_l), (filters_r, auto_r)]: [(Vec<Filter>, Option<AutoChoice>); 2] = fitted
+        .try_into()
+        .unwrap_or_else(|_| panic!("one fit per channel"));
     let autos = [auto_l, auto_r];
     let filters: [Vec<Filter>; 2] = [filters_l, filters_r];
     let imbalance_db = targets[0].reference_db - targets[1].reference_db;

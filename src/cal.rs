@@ -1,10 +1,9 @@
 //! UMIK calibration files: download, cache, parse and interpolate.
 
+use crate::files as fs;
 use std::fmt;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -224,17 +223,7 @@ pub fn fetch(
         return Ok((cal, path));
     }
     let url = orientation.url(serial);
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(20)))
-        .build()
-        .into();
-    let text = agent
-        .get(&url)
-        .call()
-        .with_context(|| format!("downloading {url}"))?
-        .body_mut()
-        .read_to_string()
-        .with_context(|| format!("reading {url}"))?;
+    let text = download(&url)?;
     if text.contains("Unable to locate calibration data") {
         bail!("miniDSP has no calibration file for serial {serial}; check the number on the mic");
     }
@@ -242,6 +231,29 @@ pub fn fetch(
     fs::create_dir_all(cache).with_context(|| format!("creating {}", cache.display()))?;
     fs::write(&path, &text).with_context(|| format!("writing {}", path.display()))?;
     Ok((cal, path))
+}
+
+/// The text at `url`.
+#[cfg(not(target_family = "wasm"))]
+fn download(url: &str) -> Result<String> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(std::time::Duration::from_secs(20)))
+        .build()
+        .into();
+    agent
+        .get(url)
+        .call()
+        .with_context(|| format!("downloading {url}"))?
+        .body_mut()
+        .read_to_string()
+        .with_context(|| format!("reading {url}"))
+}
+
+/// A web page may not download from miniDSP: its server does not let other sites read its
+/// files.
+#[cfg(target_family = "wasm")]
+fn download(url: &str) -> Result<String> {
+    bail!("a web page cannot download {url}; the installed app can")
 }
 
 /// Loads a calibration file from disk.

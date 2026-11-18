@@ -4,8 +4,7 @@
 //! how well the model reproduces the measurement, where traps would work, and whether
 //! another seat or another place for the whole setup would sound more even.
 
-use crossterm::event::KeyCode;
-
+use super::keys::KeyCode;
 use super::{App, Overlay, measure};
 use crate::analysis::Responses;
 use crate::dsp::modes::Mode;
@@ -800,16 +799,16 @@ impl App {
             m.responses[1].display.clone(),
         ];
         let (balance, merged) = (m.balance.clone(), m.merged.clone());
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
+        self.room_job = Some(crate::background::spawn(move || {
             let evidence = Evidence {
                 responses: [&responses[0], &responses[1]],
                 balance: &balance,
             };
-            let guesses = roommodel::guess(&heard, evidence, &merged, typical);
-            let _ = tx.send((measurements, guesses));
-        });
-        self.room_job = Some(rx);
+            (
+                measurements,
+                roommodel::guess(&heard, evidence, &merged, typical),
+            )
+        }));
     }
 
     /// Takes the background guesses when they are ready (waiting for them with `wait`), and
@@ -817,7 +816,7 @@ impl App {
     pub(super) fn collect_room_guess(&mut self, wait: bool) {
         let Some(job) = &self.room_job else { return };
         let got = if wait {
-            job.recv().ok()
+            crate::background::wait(job)
         } else {
             match job.try_recv() {
                 Ok(g) => Some(g),

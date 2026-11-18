@@ -1,6 +1,6 @@
 //! Remembered user choices (`$XDG_CONFIG_HOME/correctsound/config.toml`).
 
-use std::fs;
+use crate::files as fs;
 
 use serde::{Deserialize, Serialize};
 

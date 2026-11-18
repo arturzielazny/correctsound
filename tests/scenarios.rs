@@ -3,11 +3,11 @@
 
 use std::time::{Duration, Instant};
 
+use correctsound::app::keys::{KeyCode, KeyEvent, KeyModifiers};
 use correctsound::app::{App, LevelPhase, Options, Overlay, Step};
 use correctsound::audio::sim::{SimConfig, SimState};
 use correctsound::platform::sim::SINK;
 use correctsound::ui::graphics::Graphics;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 

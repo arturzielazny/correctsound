@@ -18,11 +18,12 @@
 //! it more than any EQ can; it is also the only cure for cancellation dips.
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::event::KeyCode;
+use web_time::Instant;
 
+use super::keys::KeyCode;
 use super::{App, Env, Purpose, SIM_WALL_START_M};
 use crate::audio::{AudioBackend, Channel, Program, Route, Source, Stream};
 use crate::cal::Calibration;

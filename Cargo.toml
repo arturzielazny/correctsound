@@ -10,25 +10,38 @@ readme = "README.md"
 keywords = ["audio", "room-correction", "pipewire", "easyeffects", "equalizer"]
 categories = ["multimedia::audio", "command-line-utilities"]
 
+[workspace]
+# The app in a web page (stage 1: the simulator), built for WebAssembly: see web/README.md.
+members = ["web"]
+
 [dependencies]
 anyhow = "1.0.104"
 chrono = "0.4.45"
-clap = { version = "4.6.7", features = ["derive"] }
 ab_glyph = "0.2.32"
-crossterm = "0.29.0"
 hound = "3.5.1"
 image = { version = "0.25.10", default-features = false }
-ratatui = "0.30.2"
-ratatui-image = { version = "11.1.0", default-features = false, features = ["crossterm"] }
+# Without a terminal backend: the library also runs in a web page, which has no terminal.
+ratatui = { version = "0.30.2", default-features = false, features = ["std", "layout-cache", "macros", "underline-color", "all-widgets"] }
 realfft = "3.5.1"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
-signal-hook = "0.4.6"
 thiserror = "2.0.21"
 tiny-skia = "0.12.0"
 toml = "1.2.1"
+# The clock: the standard library's everywhere but in a web page, which has its own.
+web-time = "1.1.0"
+
+# What only an installed program has: a terminal, signals, downloads over the network
+# (a web page has none of them; see src/background.rs and src/files.rs for threads and files).
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+crossterm = "0.29.0"
+ratatui = { version = "0.30.2", features = ["crossterm"] }
+ratatui-image = { version = "11.1.0", default-features = false, features = ["crossterm"] }
+signal-hook = "0.4.6"
 ureq = "3.5.2"
-# The window (--window): drawn on the GPU, all in Rust. Optional while it is an experiment.
+# The window (the default way to show the app): drawn on the GPU, all in Rust. A cargo
+# feature, on by default, so a build can leave it out (--no-default-features).
 pollster = { version = "1.0.2", optional = true }
 vello = { version = "0.12.0", optional = true, default-features = false, features = ["wgpu"] }
 # Only the GPU interfaces vello supports: Vulkan (Linux, Windows), Metal (macOS), DirectX 12
@@ -37,7 +50,12 @@ vello = { version = "0.12.0", optional = true, default-features = false, feature
 wgpu = { version = "30.0.2", optional = true, default-features = false, features = ["std", "parking_lot", "vulkan", "metal", "dx12", "wgsl"] }
 winit = { version = "0.30.13", optional = true }
 
+# In a web page the date and time come from the browser.
+[target.'cfg(target_family = "wasm")'.dependencies]
+chrono = { version = "0.4.45", features = ["wasmbind"] }
+
 [features]
+default = ["window"]
 window = ["dep:pollster", "dep:vello", "dep:wgpu", "dep:winit"]
 
 [lints.rust]
@@ -68,3 +86,9 @@ image = { version = "0.25.10", default-features = false, features = ["png"] }
 inherits = "release"
 lto = "fat"
 codegen-units = 1
+
+# The web page's program (web/build.sh): as small as `dist`, with the section wasm-bindgen
+# reads which WebAssembly features it may use.
+[profile.web]
+inherits = "dist"
+strip = "debuginfo"

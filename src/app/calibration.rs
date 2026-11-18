@@ -1,10 +1,8 @@
 //! Step 2: the mic's calibration file, downloaded by serial number, and its orientation.
 
 use std::sync::mpsc;
-use std::thread;
 
-use crossterm::event::KeyCode;
-
+use super::keys::KeyCode;
 use super::{App, CalStatus, Step};
 use crate::cal::{self, Orientation, Serial};
 
@@ -51,14 +49,12 @@ impl App {
             }
         };
         let orientation = self.orientation;
-        let (tx, rx) = mpsc::channel();
         self.config.serial = Some(serial.clone());
         self.config.orientation = orientation;
         self.config.save();
-        thread::spawn(move || {
-            let _ = tx.send(cal::fetch(&serial, orientation, &cal::cache_dir()));
-        });
-        self.cal_rx = Some(rx);
+        self.cal_rx = Some(crate::background::spawn(move || {
+            cal::fetch(&serial, orientation, &cal::cache_dir())
+        }));
         self.cal_status = CalStatus::Downloading;
     }
 

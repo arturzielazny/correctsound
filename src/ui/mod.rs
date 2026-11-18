@@ -2,6 +2,7 @@
 
 pub mod bignum;
 mod calibration;
+pub mod cells;
 mod decay;
 mod devices;
 pub mod graphics;

@@ -1,10 +1,8 @@
 //! A simulated room, mic and sink, for tests and `--simulate`.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::Result;
 
@@ -268,6 +266,8 @@ struct Chain {
 }
 
 const HISTORY: usize = 1 << 16;
+/// Samples made at a time.
+const BLOCK: usize = 1024;
 
 impl Chain {
     fn new(
@@ -398,51 +398,42 @@ impl Chain {
 
 impl AudioBackend for SimBackend {
     fn start(&mut self, mut source: Source, route: Route) -> Result<Stream> {
-        let (tx, rx) = mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
         let finished = Arc::new(AtomicBool::new(false));
         let config = Arc::clone(&self.config);
         let state = Arc::clone(&self.state);
-        let (stop2, finished2) = (Arc::clone(&stop), Arc::clone(&finished));
+        let finished2 = Arc::clone(&finished);
         // Each stream's noise comes from its number: the same on every run.
         let seed = {
             let mut st = self.state.lock().expect("sim state lock poisoned");
             st.streams += 1;
             st.streams ^ 0x5eed
         };
-        thread::spawn(move || {
-            let mut chain = Chain::new(&config, &state, source.channel, route, seed);
-            let block = 1024usize;
-            let start = Instant::now();
-            let mut frames = 0usize;
-            while !stop2.load(Ordering::Acquire) {
-                let mut buf = vec![0f32; block];
-                source.fill_mono(&mut buf);
-                // Volume and wall changes apply live, as in a real room.
-                let (vol, wall_m, position) = {
-                    let st = state.lock().expect("sim state lock poisoned");
-                    (st.sink_volume, st.wall_m, st.mic_position)
-                };
-                let room_gain = db_to_amplitude(config.rooms[source.channel.index()].gain_db);
-                chain.gain = room_gain * vol.powi(3);
-                let scene = config
-                    .scene
-                    .as_ref()
-                    .map(|s| (s, source.channel.index(), position));
-                chain.set_wall(wall_m, scene);
-                chain.process(&mut buf);
-                frames += block;
-                if source.is_done() {
-                    finished2.store(true, Ordering::Release);
-                }
-                if tx.send(buf).is_err() {
-                    break;
-                }
-                let due = Duration::from_secs_f64(frames as f64 / RATE / config.speed);
-                if let Some(wait) = due.checked_sub(start.elapsed()) {
-                    thread::sleep(wait);
-                }
+        // Set up with the stream's first block, not here: the room's paths take a while.
+        let mut chain: Option<Chain> = None;
+        let every = Duration::from_secs_f64(BLOCK as f64 / RATE / config.speed);
+        let rx = crate::background::paced(every, Arc::clone(&stop), move || {
+            let mut buf = vec![0f32; BLOCK];
+            source.fill_mono(&mut buf);
+            // Volume and wall changes apply live, as in a real room.
+            let (vol, wall_m, position) = {
+                let st = state.lock().expect("sim state lock poisoned");
+                (st.sink_volume, st.wall_m, st.mic_position)
+            };
+            let room_gain = db_to_amplitude(config.rooms[source.channel.index()].gain_db);
+            let chain = chain
+                .get_or_insert_with(|| Chain::new(&config, &state, source.channel, route, seed));
+            chain.gain = room_gain * vol.powi(3);
+            let scene = config
+                .scene
+                .as_ref()
+                .map(|s| (s, source.channel.index(), position));
+            chain.set_wall(wall_m, scene);
+            chain.process(&mut buf);
+            if source.is_done() {
+                finished2.store(true, Ordering::Release);
             }
+            buf
         });
         Ok(Stream::new(
             rx,

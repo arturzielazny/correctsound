@@ -3,8 +3,8 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use crossterm::event::KeyCode;
 
+use super::keys::KeyCode;
 use super::{App, Purpose, SaveState, VerifyResult};
 use crate::analysis::Responses;
 use crate::audio::Channel;

@@ -1,7 +1,6 @@
 //! Step 6: designing the equalizer from the measurement, and the keys that change it.
 
-use crossterm::event::KeyCode;
-
+use super::keys::KeyCode;
 use super::{App, Step};
 use crate::dsp::spectrum::Response;
 use crate::eq::fit::{Design, design_with_positions};
@@ -49,11 +48,7 @@ impl App {
         let Some(inputs) = self.design_inputs() else {
             return;
         };
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let _ = tx.send(inputs.design());
-        });
-        self.design_job = Some(rx);
+        self.design_job = Some(crate::background::spawn(move || inputs.design()));
     }
 
     /// Takes a finished background design, and starts the next one when the options changed

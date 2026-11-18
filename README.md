@@ -5,7 +5,8 @@ and a measured, verified equalizer for your speakers and room is loaded into Eas
 a bass trap around the room and watch the bass change as you walk.
 
 **Everything else is on the website: how it works, a tour of every screen, the science, and
-what's new. <https://arturzielazny.github.io/correctsound/>**
+what's new. <https://arturzielazny.github.io/correctsound/>** Or try the whole wizard in your
+browser first, against a simulated room: <https://arturzielazny.github.io/correctsound/try/>
 
 ![The result screen: measured, target and predicted response above the equalizer's curve](docs/img/6-result.png)
 
@@ -19,13 +20,17 @@ what's new. <https://arturzielazny.github.io/correctsound/>**
 curl -fsSL https://arturzielazny.github.io/correctsound/install.sh | sh
 correctsound --simulate    # the whole app against a simulated room, no hardware, any OS
 correctsound               # measure your speakers
-correctsound --window      # in a window of its own, drawn on the GPU (experimental)
+correctsound --tty         # in this terminal instead of a window of its own
 ```
+
+It opens in a window of its own, drawn on the GPU. Where no window can be opened (no display
+or GPU, or a login over SSH), it shows the same screens and keys in the terminal by itself.
 
 The script installs the ready-made program for Linux or macOS from the
 [latest release](https://github.com/arturzielazny/correctsound/releases/latest) into
 `~/.local/bin`; Windows has a zip there. From source, with Rust:
-`cargo install --locked --git https://github.com/arturzielazny/correctsound --features window`.
+`cargo install --locked --git https://github.com/arturzielazny/correctsound`
+(`--no-default-features` builds it without the window, for the terminal only).
 
 On Linux it needs PipeWire (`pw-cat`, `pw-dump`), WirePlumber (`wpctl`) and `alsa-utils`
 (`amixer`). EasyEffects is optional: without it you still get the EQ files. On macOS and Windows
@@ -57,6 +62,7 @@ When it works for you, open a pull request.
 ```sh
 cargo test                  # DSP, fitting, parsers, and the whole wizard on the simulator
 cargo run -- --simulate     # the app, no hardware
+./web/build.sh              # the web page's version (docs/try/; see web/README.md)
 ```
 
 ## License

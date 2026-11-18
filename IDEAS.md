@@ -167,13 +167,14 @@ in 30 s instead of 45). To build it:
 5. Keep one-after-the-other as a fallback where the clean stretch is too short (a room
    ringing longer than about 1.5 s at its lowest wave).
 
-## The window (`--window`, experimental)
+## The window (the default; `--tty` for the terminal)
 
 The same screens and keys in a window of its own, drawn on the GPU, all in Rust: ratatui lays
 the screen out in cells as in the terminal, then vello (on wgpu: Vulkan, Metal, DirectX 12)
 draws the text and the charts straight from the app. Charts draw through the same `Canvas`,
-which records a vello scene there instead of pixels, so every chart works in both. It is a
-cargo feature (`--features window`) while it is tried out.
+which records a vello scene there instead of pixels, so every chart works in both. It is the
+default way to show the app; `--tty`, a login over SSH, or no display or GPU keep it in the
+terminal. It is a cargo feature, on by default (`--no-default-features` leaves it out).
 
 Measured on a 5120 × 2160 screen, release build, laptop with a Radeon 890M:
 
@@ -198,6 +199,31 @@ Next for it:
 - Some time, just to see: the result screen in egui (`egui_plot` has zoom and readouts under
   the cursor built in). Its immediate mode fits how the UI already draws from the app's
   state each frame; it would look less like a terminal.
+
+## The web version
+
+Stage 1 is done: <https://arturzielazny.github.io/correctsound/try/> runs the wizard against
+the simulated room in the browser, with the terminal's screens and keys (web/README.md has how).
+Next:
+
+- Work off the page's only thread. Entering the result screen holds the page for about 0.9 s
+  (the design and the room guess, which use every core in the installed app and run one after
+  the other here). A Web Worker running the same Rust would keep the page answering;
+  `src/background.rs` is the one place to change.
+- Download the session's files from the save step (they are kept in memory now), and keep
+  sessions in the browser's storage between visits.
+- A smoke test in CI: open the page in headless Chrome, measure, and fail on a panic.
+- Stage 2, measuring for real: the mic through `getUserMedia` with echo cancellation, noise
+  suppression and automatic gain turned off; the sweep played on one channel through Web Audio
+  (an AudioWorklet feeding and recording the app's `Stream`); the output chosen with
+  `setSinkId` where the browser has it; the calibration file dropped on the page (miniDSP's
+  server does not let other sites download it). The page cannot set the mic's gain or the
+  system volume, so the level step tells the user what to change, and it cannot see an EQ
+  already running, so it asks for it to be off. The EQ is a download (EasyEffects preset,
+  Equalizer APO file).
+- Stage 3, checking the EQ without installing it: Web Audio's peaking `BiquadFilterNode` is the
+  same cookbook filter the fitter models, so the page can play the sweep through the designed
+  EQ and measure the result.
 
 ## Done
 

@@ -154,7 +154,7 @@ impl System for SimSystem {
         self.lock().eq = Some(eq.clone());
         self.bypass = false;
         let path = backup_parent.join("CorrectSound.json");
-        std::fs::write(
+        crate::files::write(
             &path,
             serde_json::to_string_pretty(&crate::eq::export::easyeffects_preset(eq))?,
         )?;

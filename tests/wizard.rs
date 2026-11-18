@@ -2,12 +2,12 @@
 
 use std::time::{Duration, Instant};
 
+use correctsound::app::keys::{KeyCode, KeyEvent, KeyModifiers};
 use correctsound::app::placement::{Mode, Reading};
 use correctsound::app::{App, LevelPhase, Options, Overlay, Step, room};
 use correctsound::eq::fit::AutoMethod;
 use correctsound::eq::target::HIGH_LIMIT_PRESETS;
 use correctsound::ui::graphics::Graphics;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 

@@ -1,7 +1,7 @@
 //! The window's key presses as the app's keys (the terminal's), so every shortcut works the
 //! same in both.
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crate::app::keys::{KeyCode, KeyEvent, KeyModifiers};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 
 /// The app's key for a pressed `key` with `mods` held; `None` for keys the app has no use

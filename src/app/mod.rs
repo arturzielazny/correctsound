@@ -4,6 +4,7 @@
 
 mod calibration;
 mod devices;
+pub mod keys;
 pub mod level;
 pub mod measure;
 mod mic_gain;
@@ -15,10 +16,11 @@ mod save;
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{Result, anyhow};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use keys::{KeyCode, KeyEvent, KeyModifiers};
+use web_time::Instant;
 
 pub use level::{LevelPhase, LevelState};
 pub use measure::{MeasureState, Purpose};
@@ -352,40 +354,27 @@ impl App {
             offset_db: info.spl_offset_db,
         };
         let sweep = crate::dsp::sweep::Sweep::new(crate::dsp::sweep::SweepParams::default());
-        // Every recording is analysed on its own thread, then taken in order.
-        let analysed: Vec<Vec<Result<crate::dsp::sweep::SweepAnalysis>>> =
-            std::thread::scope(|scope| {
-                let handles: Vec<Vec<_>> = Channel::BOTH
-                    .iter()
-                    .map(|&c| {
-                        (0..info.positions[c.index()])
-                            .map(|p| {
-                                let (sweep, session) = (&sweep, &session);
-                                scope.spawn(move || {
-                                    let rec =
-                                        crate::session::read_wav(&session.capture_path(c, p))?;
-                                    crate::dsp::sweep::SweepAnalysis::analyze(
-                                        sweep,
-                                        &rec,
-                                        crate::dsp::sweep::IrWindow::default(),
-                                    )
-                                    .map_err(|e| anyhow!("{} position {}: {e}", c.name(), p + 1))
-                                })
-                            })
-                            .collect()
-                    })
-                    .collect();
-                handles
-                    .into_iter()
-                    .map(|runs| {
-                        runs.into_iter()
-                            .map(|h| h.join().expect("analysis threads do not panic"))
-                            .collect()
-                    })
-                    .collect()
-            });
-        for (c, results) in Channel::BOTH.into_iter().zip(analysed) {
-            let runs = results.into_iter().collect::<Result<Vec<_>>>()?;
+        // Every recording is analysed at once (each on its own thread where there are
+        // threads), then taken in order.
+        let recordings: Vec<(Channel, usize)> = Channel::BOTH
+            .into_iter()
+            .flat_map(|c| (0..info.positions[c.index()]).map(move |p| (c, p)))
+            .collect();
+        let mut analysed = crate::background::map(recordings, |(c, p)| {
+            let rec = crate::session::read_wav(&session.capture_path(c, p))?;
+            crate::dsp::sweep::SweepAnalysis::analyze(
+                &sweep,
+                &rec,
+                crate::dsp::sweep::IrWindow::default(),
+            )
+            .map_err(|e| anyhow!("{} position {}: {e}", c.name(), p + 1))
+        })
+        .into_iter();
+        for c in Channel::BOTH {
+            let runs = analysed
+                .by_ref()
+                .take(info.positions[c.index()])
+                .collect::<Result<Vec<_>>>()?;
             self.measure.responses[c.index()] = Some(crate::analysis::responses(
                 &runs,
                 &cal,
