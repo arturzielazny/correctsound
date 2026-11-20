@@ -201,7 +201,8 @@ pub fn analyse(ir: &[f64], peak: usize, rate: f64) -> (Vec<Mode>, Option<BassSpe
         (FROM_HZ / bin_hz) as usize,
         (SPECTRUM_TO_HZ / bin_hz) as usize,
     );
-    // Phases relative to the direct sound: undo the lead.
+    // Phases relative to the direct sound: undo the lead delay added by `stretch`.
+    let exact_lead = -((-lead * rate) as isize) as f64 / rate;
     let bass = BassSpectrum {
         from_hz: k0 as f64 * bin_hz,
         bin_hz,
@@ -210,7 +211,7 @@ pub fn analyse(ir: &[f64], peak: usize, rate: f64) -> (Vec<Mode>, Option<BassSpe
             .enumerate()
             .map(|(i, c)| {
                 let f = (k0 + i) as f64 * bin_hz;
-                c * Complex::from_polar(1.0, -std::f64::consts::TAU * f * lead)
+                c * Complex::from_polar(1.0, std::f64::consts::TAU * f * exact_lead)
             })
             .collect(),
     };
@@ -556,5 +557,28 @@ mod tests {
     fn a_short_impulse_response_has_no_modes() {
         let (ir, peak) = room(&[(32.7, 1.6, 0.01)], 1e-7);
         assert!(find(&ir[..48_000], peak, RATE).is_empty());
+    }
+
+    #[test]
+    fn bass_spectrum_phase_is_zero_for_unit_impulse_at_peak() {
+        let n = 1 << 19;
+        let peak = 5_000;
+        let mut ir = vec![0.0; n];
+        ir[peak] = 1.0;
+        let (_, bass) = analyse(&ir, peak, RATE);
+        let bass = bass.expect("bass spectrum");
+        for hz in [25.0, 40.0, 63.0, 100.0, 150.0] {
+            let v = bass.at(hz).expect("in range");
+            assert!(
+                v.arg().abs() < 1e-3,
+                "phase at {hz} Hz should be ~0 relative to direct sound, got {:.4} rad ({v:?})",
+                v.arg()
+            );
+            assert!(
+                (v.norm() - 1.0).abs() < 1e-3,
+                "mag at {hz} Hz: {}",
+                v.norm()
+            );
+        }
     }
 }
