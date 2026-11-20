@@ -100,8 +100,10 @@ pub(super) fn setup(frame: &mut Frame<'_>, area: Rect, app: &App) {
                     let mut label = s.description.clone();
                     if d.preferred_sink.as_deref() == Some(s.name.as_str()) {
                         match &d.eq_host {
-                            Some(h) => label.push_str(&format!("  ({} output)", h.name)),
-                            None => label.push_str("  (default)"),
+                            Some(h) if h.running => {
+                                label.push_str(&format!("  ({} output)", h.name));
+                            }
+                            _ => label.push_str("  (default)"),
                         }
                     }
                     if app.last_measured_sink.as_deref() == Some(s.name.as_str()) {
