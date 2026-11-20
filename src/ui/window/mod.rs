@@ -322,9 +322,9 @@ impl Live {
         let background = self.screen.background();
         self.gpu
             .render(&scene, (self.config.width, self.config.height), background)?;
-        let (texture, suboptimal) = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(t) => (t, false),
-            wgpu::CurrentSurfaceTexture::Suboptimal(t) => (t, true),
+        let texture = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(t)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 self.surface.configure(&self.gpu.device, &self.config);
                 self.window.request_redraw();
@@ -347,9 +347,6 @@ impl Live {
         self.gpu.queue.submit([encoder.finish()]);
         self.window.pre_present_notify();
         self.gpu.queue.present(texture);
-        if suboptimal {
-            self.surface.configure(&self.gpu.device, &self.config);
-        }
         Ok(())
     }
 }
