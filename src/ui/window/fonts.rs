@@ -49,7 +49,7 @@ impl Metrics {
 
 /// Symbols the screens use that monospace fonts may lack: looked for as the window opens,
 /// so they are found by the time they are first shown.
-const SYMBOLS: &str = "✔✘✓›•…·↑↓←→±×≈≤≥°▸▶";
+const SYMBOLS: &str = "✔✘✓›•…·↑↓←→±×≈≤≥°▸▶┃";
 
 /// A fallback font found for a symbol: its file and contents, or `None` when no font has it.
 type Found = (char, Option<(PathBuf, Vec<u8>)>);

@@ -61,7 +61,7 @@ pub fn draw(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Graphics) {
     rooms(frame, rooms_area, app);
 
     let mode = d.listed.get(r.mode).copied();
-    plan(frame, plan_area, d, mode, r.view, app, gfx);
+    plan(frame, plan_area, d, mode, r.view, gfx);
     chart(frame, chart_area, d, app, gfx);
     fields(frame, fields_area, app);
     modes(frame, modes_area, d, app);
@@ -456,10 +456,8 @@ fn plan(
     d: &Derived,
     mode: Option<RoomMode>,
     view: PlanView,
-    app: &App,
     gfx: &mut Graphics,
 ) {
-    let typical = app.room_reverb_s();
     let title = match (view, mode) {
         (PlanView::Mode, Some(m)) => {
             let rings = d
@@ -476,7 +474,6 @@ fn plan(
     let block = panel(&title);
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    let _ = typical;
     if gfx.images() {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         setup_hash(&d.setup, &mut hasher);
