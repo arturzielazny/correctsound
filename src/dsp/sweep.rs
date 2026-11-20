@@ -1,10 +1,9 @@
 //! Exponential sine sweeps, deconvolution and impulse-response windowing.
 
 use std::f64::consts::{PI, TAU};
-use std::sync::{Arc, Mutex};
 
+use realfft::RealFftPlanner;
 use realfft::num_complex::Complex;
-use realfft::{RealFftPlanner, RealToComplex};
 
 use super::{amplitude_to_db, next_pow2};
 
@@ -31,14 +30,11 @@ impl Default for SweepParams {
     }
 }
 
-type CachedInverse = (usize, Arc<Vec<Complex<f64>>>);
-
-/// A generated sweep and its regularised inverse spectrum cache.
+/// A generated exponential sweep.
 #[derive(Debug, Clone)]
 pub struct Sweep {
     params: SweepParams,
     samples: Vec<f64>,
-    inverse_cache: Arc<Mutex<Option<CachedInverse>>>,
 }
 
 impl Sweep {
@@ -65,11 +61,7 @@ impl Sweep {
                 v
             })
             .collect();
-        Self {
-            params,
-            samples,
-            inverse_cache: Arc::new(Mutex::new(None)),
-        }
+        Self { params, samples }
     }
 
     #[must_use]
@@ -83,51 +75,6 @@ impl Sweep {
         self.samples.iter().map(|&v| v as f32).collect()
     }
 
-    /// Regularised Kirkeby inverse filter for FFT size `n`, cached across calls of the
-    /// same length.
-    fn inverse_filter(&self, n: usize, fft: &dyn RealToComplex<f64>) -> Arc<Vec<Complex<f64>>> {
-        if let Some((cached_n, filter)) = self
-            .inverse_cache
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .as_ref()
-            && *cached_n == n
-        {
-            return Arc::clone(filter);
-        }
-
-        let mut x = vec![0.0; n];
-        x[..self.samples.len()].copy_from_slice(&self.samples);
-        let mut xs = fft.make_output_vec();
-        fft.process(&mut x, &mut xs)
-            .expect("buffer sizes match the plan");
-
-        let rate = f64::from(self.params.rate);
-        let bin_hz = rate / n as f64;
-        let max_pow = xs.iter().map(Complex::norm_sqr).fold(0.0, f64::max);
-        let lo = self.params.start_hz * 1.2;
-        let hi = self.params.end_hz.min(rate / 2.0) / 1.05;
-        let last = xs.len() - 1;
-        for (k, xk) in xs.iter_mut().enumerate() {
-            if k == 0 || k == last {
-                *xk = Complex::new(0.0, 0.0);
-                continue;
-            }
-            let f = k as f64 * bin_hz;
-            // 0 inside the band, 1 one third-octave outside it.
-            let out = (((lo / f).log2().max((f / hi).log2())) * 3.0).clamp(0.0, 1.0);
-            let eps = max_pow * (1e-7 + out * 1.0);
-            *xk = xk.conj() / (xk.norm_sqr() + eps);
-        }
-
-        let filter = Arc::new(xs);
-        *self
-            .inverse_cache
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((n, Arc::clone(&filter)));
-        filter
-    }
-
     /// Deconvolves a recording into an impulse response of length `next_pow2(rec + sweep)`.
     ///
     /// Frequencies outside the swept band are suppressed by Kirkeby regularisation.
@@ -138,7 +85,11 @@ impl Sweep {
         let fft = planner.plan_fft_forward(n);
         let ifft = planner.plan_fft_inverse(n);
 
-        let inv = self.inverse_filter(n, fft.as_ref());
+        let mut x = vec![0.0; n];
+        x[..self.samples.len()].copy_from_slice(&self.samples);
+        let mut xs = fft.make_output_vec();
+        fft.process(&mut x, &mut xs)
+            .expect("buffer sizes match the plan");
 
         let mut y = vec![0.0; n];
         for (d, &s) in y.iter_mut().zip(recording) {
@@ -148,8 +99,22 @@ impl Sweep {
         fft.process(&mut y, &mut ys)
             .expect("buffer sizes match the plan");
 
-        for (yk, ik) in ys.iter_mut().zip(inv.iter()) {
-            *yk *= *ik;
+        let rate = f64::from(self.params.rate);
+        let bin_hz = rate / n as f64;
+        let max_pow = xs.iter().map(Complex::norm_sqr).fold(0.0, f64::max);
+        let lo = self.params.start_hz * 1.2;
+        let hi = self.params.end_hz.min(rate / 2.0) / 1.05;
+        let last = xs.len() - 1;
+        for (k, (yk, xk)) in ys.iter_mut().zip(&xs).enumerate() {
+            if k == 0 || k == last {
+                *yk = Complex::new(0.0, 0.0);
+                continue;
+            }
+            let f = k as f64 * bin_hz;
+            // 0 inside the band, 1 one third-octave outside it.
+            let out = (((lo / f).log2().max((f / hi).log2())) * 3.0).clamp(0.0, 1.0);
+            let eps = max_pow * (1e-7 + out * 1.0);
+            *yk = *yk * xk.conj() / (xk.norm_sqr() + eps);
         }
         let mut ir = ifft.make_output_vec();
         ifft.process(&mut ys, &mut ir)
@@ -278,8 +243,7 @@ impl SweepAnalysis {
             return Err(SweepIssue::NoSignal);
         }
 
-        let fft = RealFftPlanner::<f64>::new().plan_fft_forward(SPECTRUM_FFT_LEN);
-        let power = windowed_power_with_fft(&ir, peak, window, rate, fft.as_ref());
+        let power = windowed_power(&ir, peak, window, rate);
         // The same window placed on a stretch of IR that holds only noise: this is exactly
         // the noise that ends up in `power`. Just after the window for the treble, where
         // the room is quiet again within a few hundred ms; for the bass, NOISE_AFTER_MS
@@ -291,8 +255,8 @@ impl SweepAnalysis {
         // the end of the recording, where there is no noise to measure.
         let early = peak + ms(window.pre_ms + window.total_ms + 100.0);
         let late = peak + ms(NOISE_AFTER_MS);
-        let noise_early = windowed_power_with_fft(&ir, early % n, window, rate, fft.as_ref());
-        let noise_late = windowed_power_with_fft(&ir, late % n, window, rate, fft.as_ref());
+        let noise_early = windowed_power(&ir, early % n, window, rate);
+        let noise_late = windowed_power(&ir, late % n, window, rate);
         let bin_hz = rate / SPECTRUM_FFT_LEN as f64;
         let octave_snr_db: Vec<(f64, f64)> = SNR_BANDS_HZ
             .iter()
@@ -417,17 +381,6 @@ fn band_snr_db(signal: &[f64], noise: &[f64], bin_hz: f64, centre: f64) -> f64 {
 
 /// Windows the circular IR around `peak` and returns its power spectrum.
 fn windowed_power(ir: &[f64], peak: usize, window: IrWindow, rate: f64) -> Vec<f64> {
-    let fft = RealFftPlanner::<f64>::new().plan_fft_forward(SPECTRUM_FFT_LEN);
-    windowed_power_with_fft(ir, peak, window, rate, fft.as_ref())
-}
-
-fn windowed_power_with_fft(
-    ir: &[f64],
-    peak: usize,
-    window: IrWindow,
-    rate: f64,
-    fft: &dyn RealToComplex<f64>,
-) -> Vec<f64> {
     if ir.is_empty() || !rate.is_finite() || rate <= 0.0 {
         return vec![0.0; SPECTRUM_FFT_LEN / 2 + 1];
     }
@@ -451,6 +404,8 @@ fn windowed_power_with_fft(
         };
         buf[pre + i] = ir[(peak + i) % n] * w;
     }
+    let mut planner = RealFftPlanner::<f64>::new();
+    let fft = planner.plan_fft_forward(SPECTRUM_FFT_LEN);
     let mut out = fft.make_output_vec();
     fft.process(&mut buf, &mut out)
         .expect("buffer sizes match the plan");
@@ -566,36 +521,5 @@ mod tests {
         );
         assert_eq!(p.len(), SPECTRUM_FFT_LEN / 2 + 1);
         assert!(p.iter().all(|v| v.is_finite()));
-    }
-
-    #[test]
-    fn deconvolve_reuses_cached_inverse_spectrum() {
-        let sweep = Sweep::new(SweepParams {
-            len: 1 << 14,
-            ..SweepParams::default()
-        });
-        let rec = sweep.samples_f32();
-        let first = sweep.deconvolve(&rec);
-        let ptr = Arc::as_ptr(
-            &sweep
-                .inverse_cache
-                .lock()
-                .expect("lock")
-                .as_ref()
-                .expect("cached")
-                .1,
-        );
-        let second = sweep.deconvolve(&rec);
-        let ptr2 = Arc::as_ptr(
-            &sweep
-                .inverse_cache
-                .lock()
-                .expect("lock")
-                .as_ref()
-                .expect("cached")
-                .1,
-        );
-        assert_eq!(ptr, ptr2);
-        assert_eq!(first, second);
     }
 }
