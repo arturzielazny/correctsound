@@ -575,8 +575,13 @@ impl App {
 
     /// Handles one key press.
     pub fn handle_key(&mut self, key: KeyEvent) {
-        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-            self.quit = true;
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            if matches!(key.code, KeyCode::Char('c' | 'C')) {
+                self.quit = true;
+            }
+            return;
+        }
+        if key.modifiers.contains(KeyModifiers::ALT) {
             return;
         }
         if self.overlay.is_some() {
@@ -860,5 +865,22 @@ mod tests {
         assert!((with_override.cal.as_ref().expect("cal").sens_factor + 3.5).abs() < 1e-9);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ctrl_and_alt_modified_shortcuts_are_ignored_except_ctrl_c() {
+        let mut app = App::new(Options {
+            simulate: true,
+            ..Options::default()
+        });
+        app.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL));
+        app.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::ALT));
+        app.handle_key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::CONTROL));
+        app.handle_key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::ALT));
+        assert!(!app.quit);
+        assert!(app.overlay.is_none());
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+        assert!(app.quit);
     }
 }

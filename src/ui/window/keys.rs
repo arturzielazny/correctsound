@@ -8,6 +8,9 @@ use winit::keyboard::{Key, ModifiersState, NamedKey};
 /// for (a modifier on its own, function keys).
 #[must_use]
 pub fn convert(key: &Key, mods: ModifiersState) -> Option<KeyEvent> {
+    if mods.super_key() {
+        return None;
+    }
     let mut modifiers = KeyModifiers::NONE;
     if mods.shift_key() {
         modifiers |= KeyModifiers::SHIFT;
@@ -54,7 +57,7 @@ pub enum Zoom {
 /// The zoom a press asks for, if it is one.
 #[must_use]
 pub fn zoom(key: &Key, mods: ModifiersState) -> Option<Zoom> {
-    if !mods.control_key() {
+    if !mods.control_key() || mods.alt_key() || mods.super_key() {
         return None;
     }
     match key {
@@ -95,5 +98,9 @@ mod tests {
             Some(Zoom::In)
         );
         assert_eq!(zoom(&Key::Character("=".into()), none), None);
+        assert_eq!(
+            convert(&Key::Character("q".into()), ModifiersState::SUPER),
+            None
+        );
     }
 }
