@@ -536,6 +536,14 @@ pub struct Decay<'a> {
 /// The lowest level shown in the decay view, dB below the loudest start.
 const DECAY_FLOOR_DB: f64 = -45.0;
 
+/// Slices of a decay waterfall shown as curves in text terminals (steps of 20 ms).
+fn braille_decay_picks(times_ms: &[f64]) -> Vec<usize> {
+    [0.0, 40.0, 100.0, 200.0, 300.0, 400.0]
+        .iter()
+        .filter_map(|&t| times_ms.iter().position(|&m| (m - t).abs() < 1e-6))
+        .collect()
+}
+
 /// Draws a decay view: a waterfall (time running towards the viewer) as an image, or a few
 /// slices as curves in text terminals.
 pub fn draw_decay(
@@ -545,10 +553,7 @@ pub fn draw_decay(
     decay: Decay<'_>,
     gfx: &mut Graphics,
 ) {
-    let picks: Vec<usize> = [0.0, 50.0, 100.0, 200.0, 300.0, 400.0]
-        .iter()
-        .filter_map(|&t| decay.times_ms.iter().position(|&m| (m - t).abs() < 1e-6))
-        .collect();
+    let picks = braille_decay_picks(decay.times_ms);
     if !gfx.images() {
         let curves: Vec<Curve> = picks
             .iter()
@@ -847,5 +852,14 @@ mod tests {
                 )
             })
             .expect("draw tiny braille plot");
+    }
+
+    #[test]
+    fn braille_decay_picks_all_six_slices() {
+        let times: Vec<f64> = (0..crate::dsp::decay::SLICES)
+            .map(|k| k as f64 * crate::dsp::decay::SLICE_STEP_MS)
+            .collect();
+        let picks = braille_decay_picks(&times);
+        assert_eq!(picks, vec![0, 2, 5, 10, 15, 20]);
     }
 }
