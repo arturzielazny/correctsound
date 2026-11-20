@@ -161,7 +161,7 @@ fn main() {
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Char('a'));
     press(&mut app, KeyCode::Char('v'));
-    tick_until(&mut app, |a| a.save.verify.is_some());
+    tick_until(&mut app, |a| a.save.verify().is_some());
     shots.take(&app, "7-saved-verified");
     let _ = std::fs::remove_dir_all(root);
 }

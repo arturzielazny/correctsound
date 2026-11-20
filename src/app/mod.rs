@@ -140,16 +140,55 @@ impl CalStatus {
     }
 }
 
+/// Whether the EQ is installed in the EQ host, verified, or rolled back.
+#[derive(Debug, Clone, Default)]
+pub enum InstallState {
+    #[default]
+    NotInstalled,
+    Installed {
+        applied: Applied,
+        /// Verified against predicted, per channel.
+        verify: Option<[VerifyResult; 2]>,
+    },
+    /// What rolling the EQ host back did (the EQ is no longer applied).
+    RolledBack(String),
+}
+
 /// Save & apply progress.
 #[derive(Debug, Clone, Default)]
 pub struct SaveState {
     pub written: Vec<PathBuf>,
     pub error: Option<String>,
-    pub applied: Option<Applied>,
-    /// Verified against predicted, per channel.
-    pub verify: Option<[VerifyResult; 2]>,
-    /// What rolling the EQ host back did (the EQ is no longer applied).
-    pub rolled_back: Option<String>,
+    pub install: InstallState,
+}
+
+impl SaveState {
+    /// Details of the currently installed EQ, if installed.
+    #[must_use]
+    pub fn applied(&self) -> Option<&Applied> {
+        match &self.install {
+            InstallState::Installed { applied, .. } => Some(applied),
+            _ => None,
+        }
+    }
+
+    /// Verification results for the currently installed EQ, if measured.
+    #[must_use]
+    pub fn verify(&self) -> Option<&[VerifyResult; 2]> {
+        match &self.install {
+            InstallState::Installed { verify, .. } => verify.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// What rolling the EQ host back did, if rolled back.
+    #[must_use]
+    pub fn rolled_back(&self) -> Option<&str> {
+        match &self.install {
+            InstallState::RolledBack(done) => Some(done.as_str()),
+            _ => None,
+        }
+    }
 }
 
 /// How a verification sweep compares with the prediction in the corrected range,

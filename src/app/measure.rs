@@ -331,7 +331,9 @@ impl App {
                 self.room_stale = false;
                 self.save.written.clear();
                 self.save.error = None;
-                self.save.verify = None;
+                if let super::InstallState::Installed { verify, .. } = &mut self.save.install {
+                    *verify = None;
+                }
                 self.message = Some("Measurements cleared.".into());
             }
             _ => {}

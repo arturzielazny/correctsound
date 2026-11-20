@@ -11,7 +11,7 @@ use super::graphics::Graphics;
 use super::plot::{self};
 use super::result::{both_channels_range, channel_curves};
 use super::{ACCENT, bad, ok, panel, warn};
-use crate::app::{App, VerifyResult};
+use crate::app::{App, InstallState, VerifyResult};
 
 pub(super) fn save(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Graphics) {
     let [info, plots] = Layout::vertical([Constraint::Length(14), Constraint::Min(6)]).areas(area);
@@ -34,7 +34,7 @@ pub(super) fn save(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Graph
     }
     lines.push(Line::from(""));
     let host = app.eq_host_name();
-    if app.can_apply() || s.applied.is_some() {
+    if app.can_apply() || s.applied().is_some() {
         steps(app, host, &mut lines);
     } else {
         lines.push(Line::from(
@@ -77,8 +77,8 @@ fn steps(app: &App, host: &str, lines: &mut Vec<Line<'static>>) {
         "Try it in {host}, check it, then keep it or roll back to how {host} was:"
     )));
     // 1. Install.
-    match &s.applied {
-        Some(a) => {
+    match &s.install {
+        InstallState::Installed { applied: a, .. } => {
             lines.push(Line::from(ok(&format!(
                 "Installed \"{}\" in {host} and loaded it; its earlier settings are backed up in {}",
                 a.preset_name,
@@ -93,7 +93,7 @@ fn steps(app: &App, host: &str, lines: &mut Vec<Line<'static>>) {
                 )),
             }));
         }
-        None => lines.push(step(
+        InstallState::NotInstalled | InstallState::RolledBack(_) => lines.push(step(
             "1",
             "a",
             &format!("install: load it in {host} (its current settings are backed up first)"),
@@ -101,15 +101,15 @@ fn steps(app: &App, host: &str, lines: &mut Vec<Line<'static>>) {
         )),
     }
     // 2. Verify.
-    let installed = s.applied.is_some();
-    match (&s.verify, app.measure.progress()) {
+    let installed = s.applied().is_some();
+    match (s.verify(), app.measure.progress()) {
         (_, Some((ch, p))) => lines.push(Line::from(format!(
             "   Verifying {}… {:.0}%",
             ch.name().to_lowercase(),
             p * 100.0
         ))),
-        (Some(v), None) if installed => verify_lines(v, host, lines),
-        _ => {
+        (Some(v), None) => verify_lines(v, host, lines),
+        (None, None) => {
             let where_mic = if app.measure.positions[0].len() > 1 {
                 "put the mic back where the first measurement was; "
             } else {
@@ -127,12 +127,12 @@ fn steps(app: &App, host: &str, lines: &mut Vec<Line<'static>>) {
         }
     }
     // 3. Keep it or roll back.
-    match (&s.applied, &s.rolled_back) {
-        (None, Some(done)) => {
+    match &s.install {
+        InstallState::RolledBack(done) => {
             lines.push(Line::from(ok(&format!("Rolled back. {done}"))));
             lines.push(Line::from("   a installs it again."));
         }
-        _ => lines.push(step(
+        InstallState::NotInstalled | InstallState::Installed { .. } => lines.push(step(
             "3",
             "u",
             &format!("roll back: {host} goes back to how it was. Or Enter keeps it and quits."),

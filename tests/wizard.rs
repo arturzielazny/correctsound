@@ -551,16 +551,16 @@ fn full_wizard_on_simulator() {
     };
     assert!(!sim_eq(&app));
     press(&mut app, KeyCode::Char('a'));
-    assert!(app.save.applied.is_some(), "{:?}", app.save.error);
+    assert!(app.save.applied().is_some(), "{:?}", app.save.error);
     assert!(sim_eq(&app));
     assert!(render(&app).contains("put the mic back where the first measurement was"));
     press(&mut app, KeyCode::Char('v'));
     tick_until(&mut app, "verification", Duration::from_secs(20), |a| {
-        a.save.verify.is_some()
+        a.save.verify().is_some()
     });
     // Verified at the first mic position (the screen asks for the mic there), against what
     // the EQ predicts for that position: they match closely.
-    let v = app.save.verify.expect("verified");
+    let v = app.save.verify().expect("verified");
     assert!(
         v.iter().all(|r| r.rms_db < 0.5 && r.worst_db.abs() < 1.5),
         "verification {v:?}"
@@ -569,9 +569,9 @@ fn full_wizard_on_simulator() {
 
     // Rolled back: the EQ host is as it was before, and the EQ can be installed again.
     press(&mut app, KeyCode::Char('u'));
-    assert!(app.save.applied.is_none(), "{:?}", app.save.error);
+    assert!(app.save.applied().is_none(), "{:?}", app.save.error);
     assert!(!sim_eq(&app));
-    assert!(app.save.verify.is_none());
+    assert!(app.save.verify().is_none());
     let screen = render(&app);
     assert!(
         screen.contains("Rolled back") && screen.contains("installs it again"),
@@ -591,9 +591,9 @@ fn full_wizard_on_simulator() {
             .is_some_and(|m| m.contains("Nothing to roll back"))
     );
     press(&mut app, KeyCode::Char('a'));
-    assert!(app.save.applied.is_some(), "{:?}", app.save.error);
+    assert!(app.save.applied().is_some(), "{:?}", app.save.error);
     assert!(sim_eq(&app));
-    assert!(app.save.rolled_back.is_none());
+    assert!(app.save.rolled_back().is_none());
     // On the way out it says the EQ stays installed, and where the measurement is.
     let summary = app.exit_summary();
     assert!(

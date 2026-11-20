@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 
 use super::keys::KeyCode;
-use super::{App, Purpose, SaveState, VerifyResult};
+use super::{App, InstallState, Purpose, SaveState, VerifyResult};
 use crate::analysis::Responses;
 use crate::audio::Channel;
 use crate::eq::export;
@@ -88,19 +88,23 @@ impl App {
     pub fn exit_summary(&self) -> Vec<String> {
         let mut lines = Vec::new();
         let host = self.eq_host_name();
-        if let Some(a) = &self.save.applied {
-            let auto = match &a.autoload {
-                Some(output) => format!(", and loads it by itself for {output}"),
-                None => String::new(),
-            };
-            lines.push(format!(
-                "The EQ stays installed: {host} has the preset {} loaded{auto}. Your previous \
-                 {host} settings are backed up in {}.",
-                a.preset_name,
-                a.backup_dir.display()
-            ));
-        } else if self.save.rolled_back.is_some() {
-            lines.push(format!("{host} is as it was before you installed the EQ."));
+        match &self.save.install {
+            InstallState::Installed { applied: a, .. } => {
+                let auto = match &a.autoload {
+                    Some(output) => format!(", and loads it by itself for {output}"),
+                    None => String::new(),
+                };
+                lines.push(format!(
+                    "The EQ stays installed: {host} has the preset {} loaded{auto}. Your previous \
+                     {host} settings are backed up in {}.",
+                    a.preset_name,
+                    a.backup_dir.display()
+                ));
+            }
+            InstallState::RolledBack(_) => {
+                lines.push(format!("{host} is as it was before you installed the EQ."));
+            }
+            InstallState::NotInstalled => {}
         }
         if !self.reviewing()
             && let Some(dir) = self.session_dir()
@@ -141,8 +145,8 @@ impl App {
         }
         match code {
             KeyCode::Tab => self.show_next_channels(),
-            KeyCode::Char('a') if self.can_apply() && self.save.applied.is_none() => self.apply(),
-            KeyCode::Char('u') if self.save.applied.is_some() => self.roll_back(),
+            KeyCode::Char('a') if self.can_apply() && self.save.applied().is_none() => self.apply(),
+            KeyCode::Char('u') if self.save.applied().is_some() => self.roll_back(),
             KeyCode::Char('u') => {
                 self.message = Some(format!(
                     "Nothing to roll back: {} is as it was.",
@@ -156,7 +160,7 @@ impl App {
                         .into(),
                 );
             }
-            KeyCode::Char('v') if self.save.applied.is_some() => {
+            KeyCode::Char('v') if self.save.applied().is_some() => {
                 // The simulated mic goes back to the first position, as the screen asks.
                 if let Some(state) = self.sim_state() {
                     state.lock().expect("sim state lock poisoned").mic_position = 0;
@@ -195,8 +199,10 @@ impl App {
         };
         match self.system.apply_eq(&eq, &parent, &sink) {
             Ok(applied) => {
-                self.save.applied = Some(applied);
-                self.save.rolled_back = None;
+                self.save.install = InstallState::Installed {
+                    applied,
+                    verify: None,
+                };
                 self.save.error = None;
             }
             Err(e) => self.save.error = Some(format!("{e:#}")),
@@ -206,14 +212,12 @@ impl App {
     /// Puts the EQ host back as it was before the EQ was installed. The verification, made
     /// with the EQ in place, goes with it.
     pub(super) fn roll_back(&mut self) {
-        let Some(applied) = &self.save.applied else {
+        let InstallState::Installed { applied, .. } = &self.save.install else {
             return;
         };
         match self.system.undo_eq(applied) {
             Ok(done) => {
-                self.save.rolled_back = Some(done);
-                self.save.applied = None;
-                self.save.verify = None;
+                self.save.install = InstallState::RolledBack(done);
                 self.measure.verify = [None, None];
                 self.save.error = None;
             }
@@ -269,7 +273,9 @@ impl App {
                 worst_hz,
             };
         }
-        self.save.verify = Some(results);
+        if let InstallState::Installed { verify, .. } = &mut self.save.install {
+            *verify = Some(results);
+        }
     }
 
     /// Verification responses, if measured.

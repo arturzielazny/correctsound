@@ -246,7 +246,7 @@ fn step_hints(app: &App) -> &'static str {
             "Tab channels   t/T tilt   h high limit   f/F filters   d defaults   Enter save   Esc back"
         }
         Step::Save if app.measure.running() => "s stop",
-        Step::Save if app.save.applied.is_some() => {
+        Step::Save if app.save.applied().is_some() => {
             "v verify   u roll back   Tab channels   Enter/q keep it and quit   Esc back"
         }
         Step::Save if app.can_apply() => "a install   Tab channels   Enter/q quit   Esc back",
