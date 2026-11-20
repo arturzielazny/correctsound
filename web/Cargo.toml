@@ -1,6 +1,6 @@
 [package]
 name = "correctsound-web"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2024"
 description = "CorrectSound in a web page: the simulator, drawn on a canvas"
 license = "MIT"
