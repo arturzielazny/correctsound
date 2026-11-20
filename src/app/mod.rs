@@ -398,10 +398,15 @@ impl App {
     pub fn open_session(&mut self, dir: &std::path::Path) -> Result<()> {
         let session = Session::open(dir);
         let info = session.load_info()?;
-        let cal = match &info.calibration_file {
-            Some(path) => crate::cal::load(path)?,
-            None if info.simulated => SimConfig::default().calibration(),
-            None => return Err(anyhow!("the session names no calibration file")),
+        let (cal, cal_path) = match (&self.options.cal_file, &info.calibration_file) {
+            (Some(path), _) => (crate::cal::load(path)?, Some(path.clone())),
+            (None, Some(path)) => (crate::cal::load(path)?, Some(path.clone())),
+            (None, None) if info.simulated => (SimConfig::default().calibration(), None),
+            (None, None) => {
+                return Err(anyhow!(
+                    "the session names no calibration file; pass --cal-file"
+                ));
+            }
         };
         let scale = SplScale {
             offset_db: info.spl_offset_db,
@@ -436,7 +441,7 @@ impl App {
             ));
             self.measure.positions[c.index()] = runs;
         }
-        self.cal_path.clone_from(&info.calibration_file);
+        self.cal_path = cal_path;
         self.cal = Some(cal);
         self.level.ambient_spl = info.ambient_spl;
         if let Some(l) = info.needed_spl.or(info.level_spl) {
@@ -781,5 +786,77 @@ impl App {
             Env::Sim { state, .. } => state.lock().expect("sim state lock poisoned").wall_m,
             Env::Real => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn open_session_honors_cal_file_override() {
+        let dir = std::env::temp_dir().join(format!(
+            "correctsound-review-cal-override-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("session dir");
+
+        let cal_override = dir.join("override.txt");
+        std::fs::write(
+            &cal_override,
+            "\"Sens Factor =-3.5dB, SERNO: 7009999\"\n20.0 0.0\n20000.0 0.0\n",
+        )
+        .expect("override cal");
+
+        let sweep = crate::dsp::sweep::Sweep::new(crate::dsp::sweep::SweepParams::default());
+        let mut rec = vec![0.0f32; 24_000];
+        rec.extend_from_slice(&sweep.samples_f32());
+        rec.resize(rec.len() + 72_000, 0.0);
+
+        let session = Session::open(&dir);
+        session.save_capture(Channel::Left, 0, &rec).expect("left");
+        session
+            .save_capture(Channel::Right, 0, &rec)
+            .expect("right");
+        let info = crate::session::SessionInfo {
+            created: "2026-11-20T00:00:00+00:00".into(),
+            mic_serial: None,
+            calibration_file: Some(dir.join("missing.txt")),
+            sens_factor: 0.0,
+            spl_offset_db: 124.0,
+            sweep_dbfs: sweep.params().peak_dbfs,
+            sink: "sim-sink".into(),
+            simulated: false,
+            positions: [1, 1],
+            ambient_spl: None,
+            level_spl: Some(75.0),
+            needed_spl: None,
+            room_noise_spl: None,
+            room: None,
+        };
+        session.save_info(&info).expect("info");
+
+        let mut without_override = App::new(Options {
+            simulate: true,
+            ..Options::default()
+        });
+        assert!(without_override.open_session(&dir).is_err());
+
+        let mut with_override = App::new(Options {
+            simulate: true,
+            cal_file: Some(cal_override.clone()),
+            ..Options::default()
+        });
+        with_override
+            .open_session(&dir)
+            .expect("override calibration lets review open");
+        assert_eq!(
+            with_override.cal_path.as_deref(),
+            Some(cal_override.as_path())
+        );
+        assert!((with_override.cal.as_ref().expect("cal").sens_factor + 3.5).abs() < 1e-9);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

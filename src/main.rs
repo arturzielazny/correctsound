@@ -201,25 +201,27 @@ fn sessions() {
 
 /// A session directory from a path, a number from `sessions`, or the newest.
 fn pick_session(arg: Option<&str>) -> Result<PathBuf> {
+    pick_session_from(arg, Session::list().into_iter().map(|(d, _)| d).collect())
+}
+
+fn pick_session_from(arg: Option<&str>, list: Vec<PathBuf>) -> Result<PathBuf> {
     if let Some(a) = arg {
         let path = PathBuf::from(a);
         if path.is_dir() {
             return Ok(path);
         }
         if let Ok(n) = a.parse::<usize>() {
-            return Session::list()
+            let index = n
+                .checked_sub(1)
+                .with_context(|| format!("no session number {n}; see correctsound sessions"))?;
+            return list
                 .into_iter()
-                .nth(n.saturating_sub(1))
-                .map(|(dir, _)| dir)
+                .nth(index)
                 .with_context(|| format!("no session number {n}; see correctsound sessions"));
         }
         bail!("{a} is neither a session directory nor a number from correctsound sessions");
     }
-    Session::list()
-        .into_iter()
-        .next()
-        .map(|(dir, _)| dir)
-        .context("no saved sessions yet")
+    list.into_iter().next().context("no saved sessions yet")
 }
 
 fn wizard(options: Options, screen: Screen) -> Result<()> {
@@ -615,4 +617,32 @@ fn fit(
         dir.display()
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pick_session_rejects_zero_and_selects_one_based_index() {
+        let list = vec![
+            PathBuf::from("/sessions/new"),
+            PathBuf::from("/sessions/old"),
+        ];
+        assert!(pick_session_from(Some("0"), list.clone()).is_err());
+        assert_eq!(
+            pick_session_from(Some("1"), list.clone()).expect("first"),
+            PathBuf::from("/sessions/new")
+        );
+        assert_eq!(
+            pick_session_from(Some("2"), list.clone()).expect("second"),
+            PathBuf::from("/sessions/old")
+        );
+        assert!(pick_session_from(Some("3"), list.clone()).is_err());
+        assert_eq!(
+            pick_session_from(None, list).expect("newest"),
+            PathBuf::from("/sessions/new")
+        );
+        assert!(pick_session_from(None, Vec::new()).is_err());
+    }
 }
