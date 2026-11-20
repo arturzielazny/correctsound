@@ -572,7 +572,7 @@ dependencies = [
 
 [[package]]
 name = "correctsound"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -600,7 +600,7 @@ dependencies = [
 
 [[package]]
 name = "correctsound-web"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "ab_glyph",
  "correctsound",
