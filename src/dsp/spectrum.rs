@@ -103,6 +103,11 @@ impl Smoothing {
 /// two bins, the power is linearly interpolated at the band centre instead.
 #[must_use]
 pub fn smooth_power(power: &[f64], bin_hz: f64, smoothing: Smoothing) -> Response {
+    let freqs = grid();
+    if power.is_empty() || !bin_hz.is_finite() || bin_hz <= 0.0 {
+        let db = vec![super::power_to_db(0.0); freqs.len()];
+        return Response { freqs, db };
+    }
     // cum[k] = sum of power[0..k]; each bin covers [k - 0.5, k + 0.5).
     let mut cum = Vec::with_capacity(power.len() + 1);
     cum.push(0.0);
@@ -121,7 +126,6 @@ pub fn smooth_power(power: &[f64], bin_hz: f64, smoothing: Smoothing) -> Respons
                 0.0
             }
     };
-    let freqs = grid();
     let db = freqs
         .iter()
         .map(|&f| {
@@ -206,5 +210,16 @@ mod tests {
         assert_eq!(interpolate_log(&xs, &ys, 5.0), 1.0);
         assert_eq!(interpolate_log(&xs, &ys, 5000.0), 4.0);
         assert!((interpolate_log(&xs, &ys, 10f64.powf(1.5)) - 1.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn smooth_power_handles_empty_or_invalid_bins() {
+        let empty = smooth_power(&[], 1.0, Smoothing::Variable);
+        assert_eq!(empty.freqs.len(), empty.db.len());
+        assert!(empty.db.iter().all(|d| d.is_finite()));
+
+        let bad_bin = smooth_power(&[1.0, 1.0], 0.0, Smoothing::Fixed(1.0 / 12.0));
+        assert_eq!(bad_bin.freqs.len(), bad_bin.db.len());
+        assert!(bad_bin.db.iter().all(|d| d.is_finite()));
     }
 }

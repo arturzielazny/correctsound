@@ -341,6 +341,9 @@ pub fn check_clipping(recording: &[f32]) -> Result<(), SweepIssue> {
 ///
 /// Returns [`SweepIssue::NoSignal`] when the direct sound does not stand out.
 pub fn quick_ir_analysis(ir: &[f64], rate: f64) -> Result<QuickAnalysis, SweepIssue> {
+    if ir.is_empty() || !rate.is_finite() || rate <= 0.0 {
+        return Err(SweepIssue::NoSignal);
+    }
     let peak = ir
         .iter()
         .enumerate()
@@ -350,6 +353,9 @@ pub fn quick_ir_analysis(ir: &[f64], rate: f64) -> Result<QuickAnalysis, SweepIs
     let ms = |m: f64| (m * rate / 1000.0) as usize;
     let noise_start = peak + ms(window.total_ms + 100.0);
     let noise_len = ms(200.0);
+    if noise_len == 0 {
+        return Err(SweepIssue::NoSignal);
+    }
     let n = ir.len();
     let noise = (0..noise_len)
         .map(|i| ir[(noise_start + i) % n].powi(2))
@@ -375,15 +381,20 @@ fn band_snr_db(signal: &[f64], noise: &[f64], bin_hz: f64, centre: f64) -> f64 {
 
 /// Windows the circular IR around `peak` and returns its power spectrum.
 fn windowed_power(ir: &[f64], peak: usize, window: IrWindow, rate: f64) -> Vec<f64> {
+    if ir.is_empty() || !rate.is_finite() || rate <= 0.0 {
+        return vec![0.0; SPECTRUM_FFT_LEN / 2 + 1];
+    }
     let n = ir.len();
     let ms = |m: f64| ((m * rate / 1000.0) as usize).max(1);
-    let pre = ms(window.pre_ms);
-    let flat = ms(window.flat_ms);
+    let pre = ms(window.pre_ms).min(SPECTRUM_FFT_LEN - 1);
     let total = ms(window.total_ms).min(SPECTRUM_FFT_LEN - pre);
+    let flat = ms(window.flat_ms).min(total);
     let mut buf = vec![0.0; SPECTRUM_FFT_LEN];
-    for i in 0..pre {
+    let n_isize = n as isize;
+    for (i, slot) in buf.iter_mut().enumerate().take(pre) {
         let w = 0.5 - 0.5 * (PI * i as f64 / pre as f64).cos();
-        buf[i] = ir[(peak + n - pre + i) % n] * w;
+        let idx = (peak as isize - pre as isize + i as isize).rem_euclid(n_isize) as usize;
+        *slot = ir[idx] * w;
     }
     for i in 0..total {
         let w = if i < flat {
@@ -486,5 +497,29 @@ mod tests {
             SweepAnalysis::analyze(&sweep, &rec, IrWindow::default()),
             Err(SweepIssue::TooQuiet { .. })
         ));
+    }
+
+    #[test]
+    fn quick_ir_analysis_and_windowed_power_guard_degenerate_inputs() {
+        assert_eq!(
+            quick_ir_analysis(&[], 48_000.0).err(),
+            Some(SweepIssue::NoSignal)
+        );
+        assert_eq!(
+            quick_ir_analysis(&[1.0], 0.0).err(),
+            Some(SweepIssue::NoSignal)
+        );
+        let p = windowed_power(
+            &[1.0, 0.0],
+            0,
+            IrWindow {
+                pre_ms: 125.0,
+                flat_ms: 600.0,
+                total_ms: 500.0,
+            },
+            48_000.0,
+        );
+        assert_eq!(p.len(), SPECTRUM_FFT_LEN / 2 + 1);
+        assert!(p.iter().all(|v| v.is_finite()));
     }
 }

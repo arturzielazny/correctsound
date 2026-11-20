@@ -61,7 +61,7 @@ pub fn early_reflection(ir: &[f64], peak: usize, rate: f64) -> Option<Reflection
     let (i, v) = (from..to)
         .map(|i| (i, at(ir, peak, i).abs()))
         .filter(|&(i, v)| {
-            (i - around..=i + around)
+            (i.saturating_sub(around)..=i + around)
                 .filter(|&j| j != i)
                 .all(|j| at(ir, peak, j).abs() < v)
         })
@@ -77,15 +77,18 @@ pub fn early_reflection(ir: &[f64], peak: usize, rate: f64) -> Option<Reflection
 /// does not clear the noise by enough are left out.
 #[must_use]
 pub fn decay_times(ir: &[f64], peak: usize, rate: f64) -> Vec<(f64, f64)> {
+    if ir.is_empty() || !rate.is_finite() || rate <= 0.0 {
+        return Vec::new();
+    }
     let span = (DECAY_SPAN_S * rate) as usize;
     let noise = (NOISE_SPAN_S * rate) as usize;
     // A little before the direct sound, so the band filters settle on silence.
     let lead = (0.005 * rate) as usize;
-    let start = (peak + ir.len() - lead) % ir.len();
     let total = lead + span + noise;
-    if total >= ir.len() {
+    if total >= ir.len() || noise == 0 {
         return Vec::new();
     }
+    let start = (peak + ir.len() - lead) % ir.len();
     let raw: Vec<f64> = (0..total).map(|i| at(ir, start, i)).collect();
     DECAY_BANDS_HZ
         .iter()
@@ -200,5 +203,12 @@ mod tests {
         assert!((r.delay_ms - 1.25).abs() < 1e-9);
         assert!((r.level_db + 6.02).abs() < 0.01);
         assert!((r.extra_path_m() - 0.429).abs() < 0.001);
+    }
+
+    #[test]
+    fn empty_or_short_ir_does_not_panic() {
+        assert!(decay_times(&[], 0, RATE).is_empty());
+        assert!(decay_times(&[1.0; 10], 0, RATE).is_empty());
+        assert!(early_reflection(&[], 0, RATE).is_none());
     }
 }

@@ -141,6 +141,9 @@ impl Source {
         match &self.program {
             Program::Silence => 0.0,
             Program::Loop { signal, fade_in } => {
+                if signal.is_empty() {
+                    return 0.0;
+                }
                 let v = signal[i % signal.len()];
                 if i < *fade_in {
                     v * (i as f32 / *fade_in as f32).powi(2)
@@ -256,5 +259,19 @@ mod tests {
         assert_eq!(stream.error(), None);
         *slot.lock().expect("lock") = Some("playback failed".into());
         assert_eq!(stream.error().as_deref(), Some("playback failed"));
+    }
+
+    #[test]
+    fn empty_loop_program_produces_silence() {
+        let mut src = Source::new(
+            Program::Loop {
+                signal: Arc::from([] as [f32; 0]),
+                fade_in: 100,
+            },
+            Channel::Left,
+        );
+        let mut buf = [1.0f32; 8];
+        src.fill(&mut buf);
+        assert_eq!(buf, [0.0; 8]);
     }
 }
