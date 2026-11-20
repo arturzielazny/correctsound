@@ -2,17 +2,13 @@
 //! the speakers, the seat, the mic or a bass trap are moved, with a pinned reading to
 //! compare against. The screen's state, its measuring loop and its keys.
 //!
-//! Three ways to measure, all with sweeps, switched with a key:
+//! Two ways to measure, both with sweeps, switched with a key:
 //!
 //! - **Sweeps**: a short bass sweep every couple of seconds. Each gives the response at fine
 //!   resolution and a waterfall of how the bass decays, which is where bass traps show.
 //! - **Fast sweeps**: a one-second sweep played in a seamless loop
 //!   ([`crate::dsp::periodic`]), the response and the waterfall recomputed from the latest
 //!   second five times a second. A change shows fully within a second.
-//! - **Fastest sweeps**: a third-of-a-second bass sweep in a seamless loop, the response
-//!   recomputed ten times a second, so the curve follows a moving trap within about half a
-//!   second, at coarser resolution, with only a rough waterfall (the room rings longer than
-//!   one loop).
 //!
 //! Below about 200 Hz the room decides the response, and moving things by 20–50 cm changes
 //! it more than any EQ can; it is also the only cure for cancellation dips.
@@ -43,8 +39,6 @@ pub const SCORE_FROM_HZ: f64 = 40.0;
 pub const SCORE_TO_HZ: f64 = 250.0;
 /// Smoothing of a sweep reading as shown, octaves.
 const SWEEP_SMOOTHING_OCT: f64 = 1.0 / 24.0;
-/// Smoothing of a fastest-sweeps reading as shown, octaves: its bins are 2.9 Hz apart.
-const FASTEST_SMOOTHING_OCT: f64 = 1.0 / 12.0;
 /// Smoothing the score is computed at, in both modes, so their scores compare.
 const SCORE_SMOOTHING_OCT: f64 = 1.0 / 24.0;
 /// Width of the trend that peaks and dips are measured against, octaves.
@@ -57,32 +51,19 @@ const PRE: usize = SAMPLE_RATE as usize / 4;
 const POST: usize = SAMPLE_RATE as usize * 6 / 10;
 /// Capture kept after playback ends, covering output latency.
 const TAIL: Duration = Duration::from_millis(400);
-/// Fastest sweeps: one sweep is 0.34 s, the slice each update is computed from.
-const FASTEST_PERIOD: usize = 1 << 14;
-/// The fastest sweep's band, Hz: a little wider than what is shown.
-const FASTEST_BAND: (f64, f64) = (15.0, 600.0);
-/// The fastest curve is recomputed after every this many recorded samples (0.1 s of
-/// sound), counted in audio rather than clock time so the simulator behaves like a room.
-const FASTEST_HOP: usize = SAMPLE_RATE as usize / 10;
 /// Fast sweeps: one sweep is 1.02 s. Shorter, and the room would still be ringing from one
 /// sweep when the next begins, which hides the decay; the waterfall needs 0.7 s after the
 /// direct sound, and the sweep's distortion lands 0.15 s before it (wrapped around).
 const FAST_PERIOD: usize = 3 << 14;
 /// The fast sweep's range, Hz: the same as a single sweep's.
 const FAST_BAND: (f64, f64) = (10.0, SWEEP_END_HZ);
-/// The fast-sweep result is recomputed after every this many recorded samples (0.2 s).
+/// The fast-sweep result is recomputed after every this many recorded samples (0.2 s of
+/// sound), counted in audio rather than clock time so the simulator behaves like a room.
 const FAST_HOP: usize = SAMPLE_RATE as usize / 5;
 /// Recording to skip when a loop starts (start-up latency, fade-in, the room filling).
 const LOOP_SETTLE: usize = SAMPLE_RATE as usize * 3 / 4;
 /// Fade-in of a loop, so it does not start with a click.
 const LOOP_FADE_IN: usize = SAMPLE_RATE as usize / 4;
-/// Weight of the newest slice in the fastest sweeps' average (the rest is the previous
-/// average): steadies the curve against room noise while following a change within a few
-/// updates.
-const FASTEST_NEW_WEIGHT: f64 = 0.5;
-/// Below this, the sweep is taken not to reach the mic, dB (see
-/// [`Periodic::reaches_mic_db`]).
-const MIN_SNR_DB: f64 = 15.0;
 /// A problem stays on screen at least this long, even if the next reading is fine, so it
 /// can be read rather than flash by.
 const ISSUE_HOLD: Duration = Duration::from_secs(4);
@@ -94,8 +75,6 @@ pub enum Mode {
     Sweeps,
     /// A sweep looping without pauses, updated five times a second: detail and the decay.
     Fast,
-    /// A short sweep looping without pauses, updated ten times a second: a rough decay.
-    Fastest,
 }
 
 impl Mode {
@@ -104,8 +83,7 @@ impl Mode {
     pub fn next(self) -> Self {
         match self {
             Self::Sweeps => Self::Fast,
-            Self::Fast => Self::Fastest,
-            Self::Fastest => Self::Sweeps,
+            Self::Fast => Self::Sweeps,
         }
     }
 
@@ -115,7 +93,6 @@ impl Mode {
         match self {
             Self::Sweeps => "Sweeps",
             Self::Fast => "Fast sweeps",
-            Self::Fastest => "Fastest sweeps",
         }
     }
 }
@@ -196,15 +173,11 @@ impl Reading {
             }
             r
         };
-        let shown = match mode {
-            Mode::Sweeps | Mode::Fast => SWEEP_SMOOTHING_OCT,
-            Mode::Fastest => FASTEST_SMOOTHING_OCT,
-        };
         Self {
             channel,
             mode,
             score: Score::of(&calibrated(SCORE_SMOOTHING_OCT)),
-            response: calibrated(shown),
+            response: calibrated(SWEEP_SMOOTHING_OCT),
             waterfall: None,
         }
     }
@@ -249,7 +222,7 @@ enum Run {
         recording: Vec<f32>,
         finished_at: Option<Instant>,
     },
-    /// Fast or fastest sweeps.
+    /// Fast sweeps.
     Loop {
         stream: Stream,
         /// The latest recording, at most one period.
@@ -258,8 +231,6 @@ enum Run {
         received: usize,
         /// `received` at the last update.
         updated_at: usize,
-        /// The running average of the response power per bin (fastest sweeps).
-        average: Option<Vec<f64>>,
     },
 }
 
@@ -283,7 +254,6 @@ pub struct PlacementState {
     sweep: Sweep,
     signal: Arc<[f32]>,
     fast: Looped,
-    fastest: Looped,
     run: Option<Run>,
 }
 
@@ -312,7 +282,6 @@ impl PlacementState {
         let signal = sweep.samples_f32().into();
         let rate = f64::from(SAMPLE_RATE);
         let fast = Periodic::sweep(FAST_PERIOD, FAST_BAND, sweep_dbfs, rate);
-        let fastest = Periodic::sweep(FASTEST_PERIOD, FASTEST_BAND, sweep_dbfs, rate);
         Self {
             channel,
             mode: Mode::Sweeps,
@@ -326,7 +295,6 @@ impl PlacementState {
             sweep,
             signal,
             fast: Looped::new(fast, FAST_HOP),
-            fastest: Looped::new(fastest, FASTEST_HOP),
             run: None,
         }
     }
@@ -359,14 +327,9 @@ impl PlacementState {
                     finished_at: None,
                 }
             }
-            Mode::Fast | Mode::Fastest => {
-                let looped = if self.mode == Mode::Fast {
-                    &self.fast
-                } else {
-                    &self.fastest
-                };
+            Mode::Fast => {
                 let program = Program::Loop {
-                    signal: Arc::clone(&looped.samples),
+                    signal: Arc::clone(&self.fast.samples),
                     fade_in: LOOP_FADE_IN,
                 };
                 Run::Loop {
@@ -374,7 +337,6 @@ impl PlacementState {
                     recent: Vec::new(),
                     received: 0,
                     updated_at: 0,
-                    average: None,
                 }
             }
         });
@@ -461,13 +423,8 @@ impl PlacementState {
                 recent,
                 received,
                 updated_at,
-                average,
             }) => {
-                let looped = if mode == Mode::Fast {
-                    &self.fast
-                } else {
-                    &self.fastest
-                };
+                let looped = &self.fast;
                 let new = stream.drain();
                 *received += new.len();
                 recent.extend(new);
@@ -483,57 +440,19 @@ impl PlacementState {
                     self.report(e.to_string());
                     return false;
                 }
-                if mode == Mode::Fast {
-                    let ir = looped.signal.impulse_response(recent);
-                    return match quick_ir_analysis(&ir, f64::from(SAMPLE_RATE)) {
-                        Ok(q) => {
-                            let reading =
-                                Reading::from_sweep(q, mode, channel, peak_dbfs, (cal, scale));
-                            self.arrived(reading);
-                            true
-                        }
-                        Err(e) => {
-                            self.report(e.to_string());
-                            false
-                        }
-                    };
-                }
-                if looped.signal.reaches_mic_db(recent) < MIN_SNR_DB {
-                    self.report(
-                        "the sweep is not reaching the mic; check the output, the amplifier \
-                         and that the mic points at the speakers"
-                            .to_owned(),
-                    );
-                    return false;
-                }
-                let fresh = looped.signal.response_power(recent);
-                let power = match average.take() {
-                    Some(old) => old
-                        .iter()
-                        .zip(&fresh)
-                        .map(|(o, n)| o * (1.0 - FASTEST_NEW_WEIGHT) + n * FASTEST_NEW_WEIGHT)
-                        .collect(),
-                    None => fresh,
-                };
-                let mut reading = Reading::new(
-                    &power,
-                    looped.signal.bin_hz(),
-                    mode,
-                    channel,
-                    peak_dbfs,
-                    (cal, scale),
-                );
-                // A rough waterfall from the same third of a second.
                 let ir = looped.signal.impulse_response(recent);
-                let peak = ir
-                    .iter()
-                    .enumerate()
-                    .max_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))
-                    .map_or(0, |(i, _)| i);
-                reading.waterfall = Some(Waterfall::short(&ir, peak, f64::from(SAMPLE_RATE)));
-                *average = Some(power);
-                self.arrived(reading);
-                true
+                match quick_ir_analysis(&ir, f64::from(SAMPLE_RATE)) {
+                    Ok(q) => {
+                        let reading =
+                            Reading::from_sweep(q, mode, channel, peak_dbfs, (cal, scale));
+                        self.arrived(reading);
+                        true
+                    }
+                    Err(e) => {
+                        self.report(e.to_string());
+                        false
+                    }
+                }
             }
         }
     }

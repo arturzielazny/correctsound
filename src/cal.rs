@@ -206,6 +206,18 @@ pub fn cache_dir() -> PathBuf {
     crate::paths::data_dir().join("cal")
 }
 
+/// The file for `serial` saved by an earlier download, if there is one that parses.
+#[must_use]
+pub fn saved(
+    serial: &Serial,
+    orientation: Orientation,
+    cache: &Path,
+) -> Option<(Calibration, PathBuf)> {
+    let path = cache.join(orientation.file_name(serial));
+    let cal = Calibration::parse(&fs::read_to_string(&path).ok()?).ok()?;
+    Some((cal, path))
+}
+
 /// Returns the cached file for `serial`, downloading it if needed.
 ///
 /// # Errors
@@ -216,12 +228,10 @@ pub fn fetch(
     orientation: Orientation,
     cache: &Path,
 ) -> Result<(Calibration, PathBuf)> {
-    let path = cache.join(orientation.file_name(serial));
-    if let Ok(text) = fs::read_to_string(&path)
-        && let Ok(cal) = Calibration::parse(&text)
-    {
-        return Ok((cal, path));
+    if let Some(saved) = saved(serial, orientation, cache) {
+        return Ok(saved);
     }
+    let path = cache.join(orientation.file_name(serial));
     let url = orientation.url(serial);
     let text = download(&url)?;
     if text.contains("Unable to locate calibration data") {
@@ -295,6 +305,30 @@ mod tests {
         assert_eq!(c.serial.as_deref(), Some("7001234"));
         assert!(c.is_old_generation());
         assert!((c.db_at(1000.0)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_saved_file_is_used_without_downloading() {
+        let cache = std::env::temp_dir().join(format!("correctsound-cal-{}", std::process::id()));
+        fs::create_dir_all(&cache).expect("cache directory");
+        let serial: Serial = "700-0000".parse().expect("serial");
+        assert!(saved(&serial, Orientation::OnAxis, &cache).is_none());
+        fs::write(
+            cache.join("7000000_90deg.txt"),
+            include_str!("../tests/data/example-cal_90deg.txt"),
+        )
+        .expect("saved file");
+        // Only the 90° file is saved: the 0° one is still missing.
+        assert!(saved(&serial, Orientation::OnAxis, &cache).is_none());
+        let (_, path) = saved(&serial, Orientation::Vertical, &cache).expect("the saved file");
+        assert!(path.ends_with("7000000_90deg.txt"));
+        // fetch takes it too, so no download (which would fail here, for a made-up serial).
+        let (cal, _) = fetch(&serial, Orientation::Vertical, &cache).expect("no download");
+        assert_eq!(cal.len(), 615);
+        // A file that does not parse is not used.
+        fs::write(cache.join("7000000.txt"), "<!doctype html>").expect("broken file");
+        assert!(saved(&serial, Orientation::OnAxis, &cache).is_none());
+        let _ = std::fs::remove_dir_all(&cache);
     }
 
     #[test]

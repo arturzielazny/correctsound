@@ -69,10 +69,7 @@ fn app_with(name: &str, config: SimConfig, state: SimState) -> App {
 /// whatever output is selected.
 fn to_level_noise(app: &mut App) {
     press(app, KeyCode::Enter);
-    assert_eq!(app.step, Step::MicGain, "{:?}", app.message);
-    press(app, KeyCode::Enter);
-    press(app, KeyCode::Enter);
-    assert_eq!(app.step, Step::Level);
+    assert_eq!(app.step, Step::Level, "{:?}", app.message);
     tick_until(app, "a suggested level", Duration::from_secs(10), |a| {
         a.level.suggestion.is_some()
     });
@@ -151,7 +148,7 @@ fn the_chosen_output_stays_when_the_mic_is_plugged_in_late() {
         "plugging the mic in moved the output"
     );
     press(&mut app, KeyCode::Enter);
-    assert_eq!(app.step, Step::MicGain, "{:?}", app.message);
+    assert_eq!(app.step, Step::Level, "{:?}", app.message);
 }
 
 #[test]

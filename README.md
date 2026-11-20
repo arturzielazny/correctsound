@@ -36,14 +36,18 @@ On Linux it needs PipeWire (`pw-cat`, `pw-dump`), WirePlumber (`wpctl`) and `als
 (`amixer`). EasyEffects is optional: without it you still get the EQ files. On macOS and Windows
 only the simulator and saved sessions work so far.
 
-Seven steps, one key each: devices, calibration, mic gain, level, measure, result, save. On the
+Five steps, one key each: setup, level, measure, result, save. Setup is one screen for the mic,
+its calibration file (type the serial number once; the file is downloaded and saved), its gain
+and the output, and on later runs it is one Enter. On the
 way, `p` opens live placement for room treatment, `r` your room seen from above, `w` the bass
 decay, `c` curiosities about your room, `i` how it works. `Esc` goes back, `q` quits, and
-everything the app changes is put back when it exits.
+everything the app changes is put back when it exits. On the save step you install the EQ
+(`a`), verify it with the sweeps played through EasyEffects (`v`), then keep it or roll
+EasyEffects back to how it was (`u`).
 
 Other commands: `correctsound sessions` lists saved measurements, `correctsound review [N]`
 opens one again, `correctsound fit SESSION_DIR` redoes its EQ, `correctsound devices` shows what
-step 1 sees. `correctsound --help` has the rest.
+setup sees. `correctsound --help` has the rest.
 
 ## Questions and feedback
 

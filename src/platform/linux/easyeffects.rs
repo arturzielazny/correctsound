@@ -80,6 +80,75 @@ pub fn set_bypass(on: bool) -> Result<()> {
     Ok(())
 }
 
+/// The output preset EasyEffects loaded last, if it says.
+#[must_use]
+pub fn last_output_preset() -> Option<String> {
+    let name = cli(&["-a", "output"]).ok()?.trim().to_owned();
+    (!name.is_empty()).then_some(name)
+}
+
+/// What EasyEffects was doing before the first apply, to roll back to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Before {
+    /// The output preset it had loaded last.
+    pub preset: Option<String>,
+    /// Its global bypass before the app changed it.
+    pub bypass: Option<bool>,
+    /// The autoload file the apply wrote (a copy of any file it replaced is in the
+    /// backup).
+    pub autoload: Option<PathBuf>,
+}
+
+/// Rolls EasyEffects back to `before`: the autoload file as it was, the preset it had
+/// loaded, its bypass. Returns what was done, for the user.
+///
+/// # Errors
+///
+/// Fails if the autoload file cannot be put back or EasyEffects rejects the preset.
+pub fn undo(before: &Before, applied: &Applied) -> Result<String> {
+    if let Some(path) = &before.autoload {
+        restore_autoload(path, &applied.backup_dir)?;
+    }
+    let loaded = match &before.preset {
+        Some(name) => {
+            let out = cli(&["-l", name])?;
+            if out.contains("does not exist") {
+                bail!("EasyEffects no longer has the preset {name} it had loaded before");
+            }
+            format!("preset {name} loaded again")
+        }
+        // Nothing to load: its effects as they were cannot be named, so they are bypassed.
+        None => {
+            set_bypass(true)?;
+            "it had no preset loaded before, so its effects are bypassed now".to_owned()
+        }
+    };
+    if before.preset.is_some()
+        && let Some(on) = before.bypass
+    {
+        set_bypass(on)?;
+    }
+    Ok(format!(
+        "EasyEffects is back to how it was: {loaded}. {} stays in its presets, to load \
+         again any time.",
+        applied.preset_name
+    ))
+}
+
+/// Puts an autoload file written by [`set_autoload`] back as it was: the copy of the one
+/// it replaced, from `backup_dir`, or no file when there was none.
+fn restore_autoload(path: &Path, backup_dir: &Path) -> Result<()> {
+    let copy = backup_dir
+        .join("autoload-output")
+        .join(path.file_name().unwrap_or_default());
+    if copy.exists() {
+        fs::copy(&copy, path).with_context(|| format!("restoring {}", path.display()))?;
+    } else if path.exists() {
+        fs::remove_file(path).with_context(|| format!("removing {}", path.display()))?;
+    }
+    Ok(())
+}
+
 /// `outputDevice` from `easyeffectsrc`, if set.
 #[must_use]
 pub fn configured_output_device() -> Option<String> {
@@ -189,6 +258,8 @@ fn set_autoload(
 /// `autoload` target the preset also becomes the one EasyEffects loads for that output, so
 /// it survives EasyEffects restarting without saving its state.
 ///
+/// Returns the autoload file written, if any, beside what was applied.
+///
 /// # Errors
 ///
 /// Fails if the backup or preset cannot be written, or EasyEffects rejects the preset.
@@ -196,7 +267,7 @@ pub fn apply(
     eq: &EqSet,
     backup_parent: &Path,
     autoload: Option<&AutoloadTarget>,
-) -> Result<Applied> {
+) -> Result<(Applied, Option<PathBuf>)> {
     let backup_dir = backup_parent.join("easyeffects-backup");
     let db = easyeffects_config_dir().join("db");
     // Applying again in the same session must keep the backup of the settings from
@@ -218,20 +289,21 @@ pub fn apply(
         bail!("EasyEffects did not find the preset {name}");
     }
     set_bypass(false)?;
-    let autoload = match autoload {
+    let (autoload, file) = match autoload {
         Some(target) => {
             let dir = easyeffects_data_dir().join("autoload/output");
-            set_autoload(&dir, target, &name, &backup_dir)?;
-            Some(target.route.clone())
+            let file = set_autoload(&dir, target, &name, &backup_dir)?;
+            (Some(target.route.clone()), Some(file))
         }
-        None => None,
+        None => (None, None),
     };
-    Ok(Applied {
+    let applied = Applied {
         preset_name: name,
         preset_path: path,
         backup_dir,
         autoload,
-    })
+    };
+    Ok((applied, file))
 }
 
 #[cfg(test)]
@@ -290,6 +362,19 @@ mod tests {
             .join("autoload-output")
             .join(path.file_name().expect("name"));
         assert_eq!(read(&saved)["preset-name"], "CoSo-001-13112026");
+        // Rolling back puts the file from before the first apply back.
+        restore_autoload(&path, &backup).expect("restored");
+        assert_eq!(read(&path)["preset-name"], "CoSo-001-13112026");
+        // Where there was no file before, rolling back removes the one written.
+        let other = AutoloadTarget {
+            device: "alsa_output.usb-speakers".into(),
+            description: "USB speakers".into(),
+            route: "Analog Output".into(),
+        };
+        let fresh = root.join("fresh-backup");
+        let path = set_autoload(&dir, &other, "CoSo-004-13112026", &fresh).expect("written");
+        restore_autoload(&path, &fresh).expect("restored");
+        assert!(!path.exists());
         let _ = fs::remove_dir_all(&root);
     }
 }

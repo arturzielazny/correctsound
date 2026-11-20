@@ -1,4 +1,4 @@
-//! Step 6's screen: measured, target and predicted response, the equalizer's curve and its
+//! Step 4's screen: measured, target and predicted response, the equalizer's curve and its
 //! filters.
 
 use ratatui::Frame;
@@ -11,6 +11,7 @@ use super::graphics::Graphics;
 use super::panel;
 use super::plot::{self, Curve, Series, Shade};
 use crate::app::App;
+use crate::eq::fit::Design;
 use crate::eq::response_db;
 
 pub(super) fn result(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Graphics) {
@@ -21,49 +22,63 @@ pub(super) fn result(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Gra
         );
         return;
     };
-    let c = app.view_channel;
-    let ch = &design.channels[c];
+    let shown = app.shown.channels();
     let [plots, side] =
         Layout::horizontal([Constraint::Min(40), Constraint::Length(38)]).areas(area);
-    let [plot_area, eq_area] =
-        Layout::vertical([Constraint::Percentage(60), Constraint::Percentage(40)]).areas(plots);
-    let curves = channel_curves(app, c, false);
-    let name = if c == 0 { "Left" } else { "Right" };
-    let shade = Shade {
-        cut_from_hz: ch.target.cut_floor_hz(),
-        from_hz: ch.target.low_hz,
-        to_hz: ch.target.high_hz,
-    };
-    plot::draw_with_range(
-        frame,
-        plot_area,
-        &format!("{name} channel (Tab to switch)"),
-        &curves,
-        &[shade],
-        both_channels_range(app, false),
-        gfx,
-    );
     let eq_curves_of = |c: usize| {
         filter_curves(
             &design.channels[c].filters,
             design.eq.trim_db[c] + design.eq.preamp_db,
         )
     };
-    let (eq_curves, range) = eq_curves_of(c);
-    // The other channel's range too, so Tab keeps the scale.
-    let other = eq_curves_of(1 - c).1;
-    let range = (range.0.min(other.0), range.1.max(other.1));
-    plot::draw_with_range(
-        frame,
-        eq_area,
-        &format!("{name} equalizer, dB"),
-        &eq_curves,
-        &[shade],
-        range,
-        gfx,
-    );
+    // Both channels' ranges, so Tab keeps the scale and side by side they compare.
+    let (left, right) = (eq_curves_of(0).1, eq_curves_of(1).1);
+    let eq_range = (left.0.min(right.0), left.1.max(right.1));
+    let response_range = both_channels_range(app, false);
+    // The channels shown (Tab) side by side, each with its equalizer below.
+    let columns = Layout::horizontal(vec![Constraint::Fill(1); shown.len()]).split(plots);
+    for (&c, &column) in shown.iter().zip(columns.iter()) {
+        let ch = &design.channels[c];
+        let [plot_area, eq_area] =
+            Layout::vertical([Constraint::Percentage(60), Constraint::Percentage(40)])
+                .areas(column);
+        let name = if c == 0 { "Left" } else { "Right" };
+        let shade = Shade {
+            cut_from_hz: ch.target.cut_floor_hz(),
+            from_hz: ch.target.low_hz,
+            to_hz: ch.target.high_hz,
+        };
+        plot::draw_with_range(
+            frame,
+            plot_area,
+            &format!("{name} channel"),
+            &channel_curves(app, c, false),
+            &[shade],
+            response_range,
+            gfx,
+        );
+        plot::draw_with_range(
+            frame,
+            eq_area,
+            &format!("{name} equalizer, dB"),
+            &eq_curves_of(c).0,
+            &[shade],
+            eq_range,
+            gfx,
+        );
+    }
+    side_panel(frame, side, app, design, gfx);
+}
 
+/// The options, the numbers of the design and the filters of the channels shown.
+fn side_panel(frame: &mut Frame<'_>, side: Rect, app: &App, design: &Design, gfx: &Graphics) {
+    let shown = app.shown.channels();
+    let one = match shown {
+        [c] => Some(&design.channels[*c]),
+        _ => None,
+    };
     // The options as asked for, at once; the numbers below them follow with the design.
+    // What "auto" chose is shown for one channel; for both, each channel's block has it.
     let o = &app.design_options;
     let mut lines = vec![
         Line::from(format!(
@@ -72,16 +87,18 @@ pub(super) fn result(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Gra
         )),
         Line::from(format!(
             "High limit   {:<15} (h)",
-            match o.high_limit_hz {
-                Some(h) => format!("{h:.0} Hz"),
-                None => format!("auto ({:.0} Hz)", ch.target.high_hz),
+            match (o.high_limit_hz, one) {
+                (Some(h), _) => format!("{h:.0} Hz"),
+                (None, Some(ch)) => format!("auto ({:.0} Hz)", ch.target.high_hz),
+                (None, None) => "auto".to_owned(),
             }
         )),
         Line::from(format!(
             "Filters      {:<15} (f/F)",
-            match o.max_filters {
-                Some(n) => n.to_string(),
-                None => format!("auto ({})", ch.filters.len()),
+            match (o.max_filters, one) {
+                (Some(n), _) => n.to_string(),
+                (None, Some(ch)) => format!("auto ({})", ch.filters.len()),
+                (None, None) => "auto".to_owned(),
             }
         )),
         Line::from(if app.designing() {
@@ -89,66 +106,95 @@ pub(super) fn result(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Gra
         } else {
             Span::raw("")
         }),
-        Line::from(format!(
-            "Corrected    {:.0}–{:.0} Hz",
-            ch.target.low_hz, ch.target.high_hz
-        )),
-        Line::from(if ch.target.roll_off.is_empty() {
-            String::new()
-        } else {
-            format!("  + cuts to  {:.0} Hz", ch.target.cut_floor_hz())
-        }),
-        Line::from(vec![
-            Span::raw("RMS error    "),
-            Span::styled(
-                format!("{:.1}", ch.rms_before_db),
-                Style::default().fg(Series::Measured.color(gfx)),
-            ),
-            Span::raw(" → "),
-            Span::styled(
-                format!("{:.1} dB", ch.rms_after_db),
-                Style::default().fg(Series::Predicted.color(gfx)).bold(),
-            ),
-        ]),
         Line::from(format!("Preamp       {:.1} dB", design.eq.preamp_db)),
-        Line::from(format!(
-            "L/R balance  {:+.1} dB (trim {:.1})",
-            design.imbalance_db, design.eq.trim_db[c]
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            "   Freq      Gain     Q",
-            Style::default().bold(),
-        )),
+        Line::from(format!("L/R balance  {:+.1} dB", design.imbalance_db)),
     ];
-    // As many filters as fit (inside the border), the rest summarised.
-    let room = usize::from(side.height.saturating_sub(2)).saturating_sub(lines.len());
-    let shown = if ch.filters.len() > room {
-        room.saturating_sub(1)
-    } else {
-        ch.filters.len()
-    };
-    for f in &ch.filters[..shown] {
-        let color = if f.gain < 0.0 {
-            Color::LightRed
+    // Each channel's numbers, then as many of its filters as fit (inside the border, the
+    // room shared between the channels), the rest summarised.
+    let blocks: Vec<Vec<Line<'_>>> = shown
+        .iter()
+        .map(|&c| channel_block(design, c, one.is_none(), gfx))
+        .collect();
+    let used = lines.len() + blocks.iter().map(Vec::len).sum::<usize>();
+    let room = usize::from(side.height.saturating_sub(2)).saturating_sub(used) / shown.len();
+    for (&c, block) in shown.iter().zip(blocks) {
+        lines.extend(block);
+        let filters = &design.channels[c].filters;
+        let fits = if filters.len() > room {
+            room.saturating_sub(1)
         } else {
-            Color::LightGreen
+            filters.len()
         };
-        lines.push(Line::from(Span::styled(
-            format!("{:>7.1} Hz {:>+5.1} dB {:>5.2}", f.freq, f.gain, f.q),
-            Style::default().fg(color),
-        )));
-    }
-    if shown < ch.filters.len() {
-        lines.push(Line::from(Span::styled(
-            format!("  + {} more (report.txt)", ch.filters.len() - shown),
-            Style::default().fg(Color::Gray),
-        )));
-    }
-    if ch.filters.is_empty() {
-        lines.push(Line::from("  (no correction needed)"));
+        for f in &filters[..fits] {
+            let color = if f.gain < 0.0 {
+                Color::LightRed
+            } else {
+                Color::LightGreen
+            };
+            lines.push(Line::from(Span::styled(
+                format!("{:>7.1} Hz {:>+5.1} dB {:>5.2}", f.freq, f.gain, f.q),
+                Style::default().fg(color),
+            )));
+        }
+        if fits < filters.len() {
+            lines.push(Line::from(Span::styled(
+                format!("  + {} more (report.txt)", filters.len() - fits),
+                Style::default().fg(Color::Gray),
+            )));
+        }
+        if filters.is_empty() {
+            lines.push(Line::from("  (no correction needed)"));
+        }
     }
     frame.render_widget(Paragraph::new(Text::from(lines)).block(panel("EQ")), side);
+}
+
+/// A channel's numbers above its filters: named when both channels are shown.
+fn channel_block(design: &Design, c: usize, named: bool, gfx: &Graphics) -> Vec<Line<'static>> {
+    let ch = &design.channels[c];
+    let mut lines = vec![Line::from("")];
+    if named {
+        let (name, series) = if c == 0 {
+            ("Left", Series::Left)
+        } else {
+            ("Right", Series::Right)
+        };
+        lines.push(Line::from(Span::styled(
+            name,
+            Style::default().fg(series.color(gfx)).bold(),
+        )));
+    }
+    lines.push(Line::from(format!(
+        "Corrected    {:.0}–{:.0} Hz",
+        ch.target.low_hz, ch.target.high_hz
+    )));
+    if !ch.target.roll_off.is_empty() {
+        lines.push(Line::from(format!(
+            "  + cuts to  {:.0} Hz",
+            ch.target.cut_floor_hz()
+        )));
+    }
+    lines.push(Line::from(vec![
+        Span::raw("RMS error    "),
+        Span::styled(
+            format!("{:.1}", ch.rms_before_db),
+            Style::default().fg(Series::Measured.color(gfx)),
+        ),
+        Span::raw(" → "),
+        Span::styled(
+            format!("{:.1} dB", ch.rms_after_db),
+            Style::default().fg(Series::Predicted.color(gfx)).bold(),
+        ),
+    ]));
+    lines.push(Line::from(format!(
+        "Trim         {:.1} dB",
+        design.eq.trim_db[c]
+    )));
+    lines.push(Line::from(Span::styled(
+        "   Freq      Gain     Q",
+        Style::default().bold(),
+    )));
+    lines
 }
 
 /// Measured / target / predicted (and optionally verified) curves at display smoothing.

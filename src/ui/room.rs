@@ -29,7 +29,7 @@ const SIDE_WIDTH: u16 = 52;
 /// Draws the room screen in `area`.
 pub fn draw(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Graphics) {
     let r = &app.room;
-    let Some(d) = r.current() else {
+    let Some(d) = r.shown() else {
         let text = if r.setup().is_some() {
             "Those dimensions are not a room (1.5–30 m, at least 1.8 m high): correct them."
         } else {

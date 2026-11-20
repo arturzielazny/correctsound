@@ -1,4 +1,4 @@
-//! Step 5 (and the verification pass): sweeps per channel, with checks and analysis; the
+//! Step 3 (and the verification pass): sweeps per channel, with checks and analysis; the
 //! step's keys, and the session's settings saved with each measurement.
 
 use std::sync::Arc;
@@ -271,6 +271,7 @@ impl App {
         let have_both = self.measure.positions.iter().all(|p| !p.is_empty());
         match code {
             KeyCode::Char('p') => self.open_placement(),
+            KeyCode::Tab => self.show_next_channels(),
             KeyCode::Enter if have_both => self.go(Step::Result),
             KeyCode::Enter | KeyCode::Char('m') => self.start_sweeps(Purpose::Measure),
             KeyCode::Char('a') if have_both => {
@@ -313,7 +314,7 @@ impl App {
             let now = gain.off_unity();
             self.mic_gain = Some(gain);
             return Err(anyhow!(
-                "the mic gain changed since step 3 (now {now}); press Esc and fix it"
+                "the mic gain changed (now {now}); go back to setup with Esc, where Enter sets it to unity again"
             ));
         }
         let now = self.current_sink_volume();

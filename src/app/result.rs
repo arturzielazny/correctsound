@@ -1,4 +1,4 @@
-//! Step 6: designing the equalizer from the measurement, and the keys that change it.
+//! Step 4: designing the equalizer from the measurement, and the keys that change it.
 
 use super::keys::KeyCode;
 use super::{App, Step};
@@ -112,7 +112,7 @@ impl App {
         let o = &mut self.design_options;
         match code {
             KeyCode::Tab => {
-                self.view_channel = 1 - self.view_channel;
+                self.show_next_channels();
                 return;
             }
             KeyCode::Char('t') => o.tilt_db_per_oct = (o.tilt_db_per_oct - 0.25).max(-1.5),

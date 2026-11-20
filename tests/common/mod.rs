@@ -84,9 +84,7 @@ pub fn measured_session(during_measure: impl FnOnce(&mut App)) -> PathBuf {
         ..Options::default()
     });
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Enter);
-    assert_eq!(app.step, Step::Level);
+    assert_eq!(app.step, Step::Level, "{:?}", app.message);
     tick_until(&mut app, "a level", Duration::from_secs(10), |a| {
         a.level.suggestion.is_some()
     });

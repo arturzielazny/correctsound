@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use correctsound::app::keys::{KeyCode, KeyEvent, KeyModifiers};
 use correctsound::app::placement::{Mode, Reading};
-use correctsound::app::{App, LevelPhase, Options, Overlay, Step, room};
+use correctsound::app::{App, LevelPhase, Options, Overlay, Shown, Step, room};
 use correctsound::eq::fit::AutoMethod;
 use correctsound::eq::target::HIGH_LIMIT_PRESETS;
 use correctsound::ui::graphics::Graphics;
@@ -78,21 +78,32 @@ fn full_wizard_on_simulator() {
         simulate: true,
         ..Options::default()
     });
-    assert_eq!(app.step, Step::Preflight);
-    assert!(render(&app).contains("Simulated speakers"));
-
-    press(&mut app, KeyCode::Enter);
-    assert_eq!(app.step, Step::MicGain, "{:?}", app.message);
+    assert_eq!(app.step, Step::Setup);
+    // One screen: the mic, its calibration, its gain (off unity in the simulator) and the
+    // outputs, and one Enter sets the gain and goes on.
+    let setup = render(&app);
+    assert!(setup.contains("Simulated speakers"), "{setup}");
+    assert!(
+        setup.contains("Calibration: the simulated mic's"),
+        "{setup}"
+    );
     assert!(!app.mic_gain.as_ref().expect("gain read").is_unity());
-    assert!(render(&app).contains("set these to unity"));
+    assert!(
+        setup.contains("Enter sets the mic gain and continues"),
+        "{setup}"
+    );
     press(&mut app, KeyCode::Enter);
+    assert_eq!(app.step, Step::Level, "{:?}", app.message);
     assert!(app.mic_gain.as_ref().expect("gain read").is_unity());
-    press(&mut app, KeyCode::Enter);
-    assert_eq!(app.step, Step::Level);
+    assert_eq!(app.message, None);
 
-    // Listening to the room first: the simulated room rumbles a little in the bass, so the
-    // suggested level is a little above the floor and set by the 63 Hz octave.
-    assert_eq!(app.level.phase, LevelPhase::Listening);
+    // Listening to the room first, once EasyEffects is bypassed beside the screen: the
+    // simulated room rumbles a little in the bass, so the suggested level is a little above
+    // the floor and set by the 63 Hz octave.
+    tick_until(&mut app, "listening", Duration::from_secs(2), |a| {
+        a.level.phase == LevelPhase::Listening
+    });
+    assert!(!app.bypassing_eq());
     press(&mut app, KeyCode::Enter);
     assert_eq!(app.level.phase, LevelPhase::Listening, "too early to play");
     tick_until(
@@ -114,6 +125,17 @@ fn full_wizard_on_simulator() {
         screen.contains("Keep quiet") && screen.contains("Bass") && screen.contains("dB SPL"),
         "{screen}"
     );
+    // It says it is live: the time keeps counting, a tick on each bar is the sound right now,
+    // and the number says it follows the room.
+    assert!(app.level.room_noise_now.is_some());
+    assert!(
+        screen.contains("live,") && screen.contains("┃") && screen.contains("follows the room"),
+        "{screen}"
+    );
+    let before = app.level.listening_secs();
+    tick_until(&mut app, "more listening", Duration::from_secs(5), |a| {
+        a.level.listening_secs() >= before + 1.0
+    });
     // Every row of the big number starts in the same column (wrapping once trimmed the
     // spaces off some rows, so a 7 looked like a T). Shown as 71, whose rows start with gaps.
     if let Some(s) = app.level.suggestion.as_mut() {
@@ -280,78 +302,9 @@ fn full_wizard_on_simulator() {
         press(&mut app, KeyCode::Right);
     }
 
-    // Fastest sweeps: a short sweep looping, a new reading every tenth of a second.
+    // Two modes: m goes back to single sweeps.
     press(&mut app, KeyCode::Char('m'));
-    let seen = count(&app);
-    tick_until(&mut app, "fastest sweeps", Duration::from_secs(30), |a| {
-        count(a) >= seen + 5
-    });
-    let live = app
-        .placement
-        .as_ref()
-        .and_then(|p| p.latest.clone())
-        .expect("fastest reading");
-    assert_eq!(live.mode, Mode::Fastest);
-    // Its waterfall is only rough: the first 120 ms.
-    let rough = live.waterfall.as_ref().expect("a rough waterfall");
-    assert_eq!(rough.times_ms.last().copied(), Some(120.0));
-    assert!(render(&app).contains("rough"));
-    // The same placement measured the other way looks the same: the fastest curve matches
-    // the sweep at this wall distance (1 m) much better than the one at the other (0.6 m).
-    let (same, other) = (
-        shape_difference(&live, &now),
-        shape_difference(&live, &pinned),
-    );
-    eprintln!("fastest at 1 m vs sweep at 1 m {same:.2} dB, vs sweep at 0.6 m {other:.2} dB");
-    assert!(same < other / 2.0, "{same} vs {other}");
-    // Moving the wall while the sweep loops: the dip follows within a few updates (0.1 s of
-    // sound each, while the app keeps up). "Follows" means as close to the sweep there as
-    // this mode gets anywhere: its 2.9 Hz steps read a room's narrowest resonances a little
-    // off.
-    let accuracy = same + 0.5;
-    app.tick();
-    for _ in 0..8 {
-        press(&mut app, KeyCode::Left);
-    }
-    let moved_at = count(&app);
-    tick_until(
-        &mut app,
-        "the fastest curve to follow",
-        Duration::from_secs(10),
-        |a| {
-            a.placement
-                .as_ref()
-                .and_then(|p| p.latest.as_ref())
-                .is_some_and(|r| shape_difference(r, &pinned) < accuracy)
-        },
-    );
-    let updates = count(&app) - moved_at;
-    eprintln!("fastest sweeps followed the move in {updates} updates");
-    // One period (3.4 updates) and the average settling.
-    assert!(updates <= 8, "{updates} updates");
-    let seen = count(&app);
-    tick_until(
-        &mut app,
-        "fastest after moving",
-        Duration::from_secs(10),
-        |a| count(a) >= seen + 10,
-    );
-    let moved = app
-        .placement
-        .as_ref()
-        .and_then(|p| p.latest.clone())
-        .expect("fastest reading");
-    let (same, other) = (
-        shape_difference(&moved, &pinned),
-        shape_difference(&moved, &now),
-    );
-    eprintln!("fastest at 0.6 m vs sweep at 0.6 m {same:.2} dB, vs sweep at 1 m {other:.2} dB");
-    assert!(same < other / 2.0, "{same} vs {other}");
-    assert!(render(&app).contains("Fastest sweeps"));
-    // Back where it was for the measurements that follow.
-    for _ in 0..8 {
-        press(&mut app, KeyCode::Right);
-    }
+    assert_eq!(app.placement.as_ref().map(|p| p.mode), Some(Mode::Sweeps));
     press(&mut app, KeyCode::Esc);
     assert!(app.placement.is_none());
     assert_eq!(app.step, Step::Measure);
@@ -376,6 +329,23 @@ fn full_wizard_on_simulator() {
     for r in app.measure.responses.iter().flatten() {
         assert_eq!(r.positions_display.len(), 2);
     }
+    // Tab shows the left channel only, the right only, then both again.
+    assert_eq!(app.shown, Shown::Both);
+    assert!(
+        screen.contains("Left") && screen.contains("Right"),
+        "{screen}"
+    );
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(app.shown, Shown::Left);
+    let screen = render(&app);
+    assert!(
+        screen.contains("Left") && !screen.contains("Right"),
+        "{screen}"
+    );
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(app.shown, Shown::Right);
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(app.shown, Shown::Both);
 
     press(&mut app, KeyCode::Enter);
     assert_eq!(app.step, Step::Result);
@@ -422,9 +392,26 @@ fn full_wizard_on_simulator() {
         Some(most - 1)
     );
     press(&mut app, KeyCode::Char('d'));
+    // Both channels side by side, then each alone with Tab.
+    let screen = render(&app);
+    assert!(
+        screen.contains("Left channel") && screen.contains("Right channel"),
+        "{screen}"
+    );
     press(&mut app, KeyCode::Tab);
+    let screen = render(&app);
+    assert!(
+        screen.contains("Left channel") && !screen.contains("Right channel"),
+        "{screen}"
+    );
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(app.shown, Shown::Right);
     assert_eq!(app.view_channel, 1);
-    assert!(render(&app).contains("Right channel"));
+    let screen = render(&app);
+    assert!(
+        screen.contains("Right channel") && !screen.contains("Left channel"),
+        "{screen}"
+    );
 
     // The decay view opens on the shown channel and switches with Tab.
     press(&mut app, KeyCode::Char('w'));
@@ -477,7 +464,8 @@ fn full_wizard_on_simulator() {
     assert_eq!(entered.room.length, 5.64);
     assert_eq!(app.room.selected, room::Selected::Yours(0));
     assert_eq!(app.room.guesses[0].setup, guessed);
-    assert!(render(&app).contains("Your room 1, saved"));
+    let screen = render(&app);
+    assert!(screen.contains("Your room 1, saved"), "{screen}");
     // ←/→ move the selected thing by 5 cm: the setup's distance from its side wall.
     for _ in 0..4 {
         press(&mut app, KeyCode::Down);
@@ -536,14 +524,35 @@ fn full_wizard_on_simulator() {
     for p in &app.save.written {
         assert!(p.exists(), "{}", p.display());
     }
+    // Tab here too, from the right channel alone back to both.
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(app.shown, Shown::Both);
     let left = std::fs::read_to_string(&app.save.written[0]).expect("left.txt");
     assert!(left.starts_with("Preamp: "));
     let session = app.session_dir().expect("session");
     assert!(session.join("left-1-capture.wav").exists());
     assert!(session.join("session.toml").exists());
 
+    // The screen says what can be done: install, verify, then keep it or roll back.
+    let screen = render(&app);
+    assert!(
+        screen.contains("a install")
+            && screen.contains("v verify")
+            && screen.contains("u roll back"),
+        "{screen}"
+    );
+    let sim_eq = |app: &App| {
+        app.sim_state()
+            .expect("simulated")
+            .lock()
+            .expect("sim state")
+            .eq
+            .is_some()
+    };
+    assert!(!sim_eq(&app));
     press(&mut app, KeyCode::Char('a'));
     assert!(app.save.applied.is_some(), "{:?}", app.save.error);
+    assert!(sim_eq(&app));
     assert!(render(&app).contains("put the mic back where the first measurement was"));
     press(&mut app, KeyCode::Char('v'));
     tick_until(&mut app, "verification", Duration::from_secs(20), |a| {
@@ -557,6 +566,27 @@ fn full_wizard_on_simulator() {
         "verification {v:?}"
     );
     assert!(render(&app).contains("Verification"));
+
+    // Rolled back: the EQ host is as it was before, and the EQ can be installed again.
+    press(&mut app, KeyCode::Char('u'));
+    assert!(app.save.applied.is_none(), "{:?}", app.save.error);
+    assert!(!sim_eq(&app));
+    assert!(app.save.verify.is_none());
+    let screen = render(&app);
+    assert!(
+        screen.contains("Rolled back") && screen.contains("installs it again"),
+        "{screen}"
+    );
+    press(&mut app, KeyCode::Char('u'));
+    assert!(
+        app.message
+            .as_deref()
+            .is_some_and(|m| m.contains("Nothing to roll back"))
+    );
+    press(&mut app, KeyCode::Char('a'));
+    assert!(app.save.applied.is_some(), "{:?}", app.save.error);
+    assert!(sim_eq(&app));
+    assert!(app.save.rolled_back.is_none());
 
     press(&mut app, KeyCode::Enter);
     assert!(app.quit);

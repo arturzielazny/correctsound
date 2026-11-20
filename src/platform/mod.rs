@@ -21,6 +21,10 @@ use anyhow::{Result, bail};
 use crate::audio::{AudioBackend, Route};
 use crate::eq::EqSet;
 
+/// Work for the system that may take a while (EasyEffects answers each command in about a
+/// fifth of a second), so the app runs it beside the screen instead of on a key.
+pub type Job = Box<dyn FnOnce() -> Result<()> + Send>;
+
 /// An audio input or output device.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Device {
@@ -178,12 +182,10 @@ pub trait System: Send {
     /// Fails if the host cannot be asked.
     fn eq_bypass(&mut self) -> Result<Option<bool>>;
 
-    /// Bypasses the EQ host or turns it back on, registering the undo step first.
-    ///
-    /// # Errors
-    ///
-    /// Fails if the host cannot be told.
-    fn set_eq_bypass(&mut self, bypass: bool) -> Result<()>;
+    /// Bypasses the EQ host or turns it back on, registering the undo step first. An EQ host
+    /// may be slow to answer, so this is a job the app runs beside the screen; it fails if
+    /// the host cannot be told.
+    fn bypass_eq(&mut self, bypass: bool) -> Job;
 
     /// The audio backend that plays to `sink` and records `mic`.
     fn audio(&mut self, mic: &Device, sink: &Device) -> Box<dyn AudioBackend>;
@@ -203,6 +205,16 @@ pub trait System: Send {
     ///
     /// Fails if there is no EQ host, or the backup or the EQ cannot be written or loaded.
     fn apply_eq(&mut self, eq: &EqSet, backup_parent: &Path, sink: &Device) -> Result<Applied>;
+
+    /// Rolls the EQ host back to how it was before the first [`Self::apply_eq`] since the
+    /// app started (or since the last roll-back), which returned `applied`: the settings
+    /// it had loaded, and what it loaded automatically for the output. The installed EQ
+    /// stays available in the host, to load again. Returns what was done, for the user.
+    ///
+    /// # Errors
+    ///
+    /// Fails if nothing was applied, or the host cannot be put back.
+    fn undo_eq(&mut self, applied: &Applied) -> Result<String>;
 }
 
 /// The real system on the platform the app was built for.
@@ -210,7 +222,7 @@ pub trait System: Send {
 pub fn native() -> Box<dyn System> {
     #[cfg(target_os = "linux")]
     {
-        Box::new(linux::Linux)
+        Box::new(linux::Linux::default())
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -275,8 +287,8 @@ impl System for Unsupported {
         Ok(None)
     }
 
-    fn set_eq_bypass(&mut self, _bypass: bool) -> Result<()> {
-        unsupported()
+    fn bypass_eq(&mut self, _bypass: bool) -> Job {
+        Box::new(unsupported)
     }
 
     fn audio(&mut self, _mic: &Device, _sink: &Device) -> Box<dyn AudioBackend> {
@@ -288,6 +300,10 @@ impl System for Unsupported {
     }
 
     fn apply_eq(&mut self, _eq: &EqSet, _backup_parent: &Path, _sink: &Device) -> Result<Applied> {
+        unsupported()
+    }
+
+    fn undo_eq(&mut self, _applied: &Applied) -> Result<String> {
         unsupported()
     }
 }

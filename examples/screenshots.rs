@@ -40,11 +40,8 @@ fn main() {
         simulate: true,
         ..Options::default()
     });
-    shots.take(&app, "1-devices");
+    shots.take(&app, "1-setup");
 
-    press(&mut app, KeyCode::Enter);
-    shots.take(&app, "3-mic-gain");
-    press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
     // Listening to the room, then the noise at the level it calls for.
     tick_until(&mut app, |a| a.level.listened_secs() >= 3.0);
@@ -122,14 +119,6 @@ fn main() {
     for _ in 0..10 {
         press(&mut app, KeyCode::Left);
     }
-    // Fastest sweeps: the same comparison, from a short sweep looping, ten times a second.
-    press(&mut app, KeyCode::Char('m'));
-    let seen = app.placement.as_ref().map_or(0, |p| p.count);
-    tick_until(&mut app, |a| {
-        a.placement.as_ref().is_some_and(|p| p.count >= seen + 15)
-    });
-    app.message = None;
-    shots.take(&app, "5c-fastest");
     press(&mut app, KeyCode::Esc);
 
     press(&mut app, KeyCode::Enter);

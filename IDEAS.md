@@ -249,7 +249,8 @@ Next:
   around). Sweeps have a
   lower crest factor than noise, so more signal at the same peak level. The most even
   curve so far (faded green) is gone: it cluttered the chart; the pinned curve is drawn
-  solid and dimmer, behind the latest.
+  solid and dimmer, behind the latest. (Later removed: fast sweeps follow a change within a
+  second at full detail and with a real waterfall, which is fast enough.)
 - **Instant on large screens**: on a 5K monitor a change on the result screen sent 48 MB
   of uncompressed chart pixels to the terminal; charts are now compressed (about 1 MB) and
   encoded in parallel bands. The EQ fit placed its filters once per count (16 times over);

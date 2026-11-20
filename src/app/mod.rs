@@ -2,16 +2,14 @@
 //!
 //! Nothing here touches the terminal; [`crate::ui`] renders an [`App`].
 
-mod calibration;
-mod devices;
 pub mod keys;
 pub mod level;
 pub mod measure;
-mod mic_gain;
 pub mod placement;
 mod result;
 pub mod room;
 mod save;
+mod setup;
 
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
@@ -73,9 +71,8 @@ pub enum Overlay {
 /// Wizard steps, in order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Step {
-    Preflight,
-    Calibration,
-    MicGain,
+    /// The mic, its calibration and gain, and the output, on one screen.
+    Setup,
     Level,
     Measure,
     Result,
@@ -83,10 +80,8 @@ pub enum Step {
 }
 
 impl Step {
-    pub const ALL: [Self; 7] = [
-        Self::Preflight,
-        Self::Calibration,
-        Self::MicGain,
+    pub const ALL: [Self; 5] = [
+        Self::Setup,
         Self::Level,
         Self::Measure,
         Self::Result,
@@ -96,9 +91,7 @@ impl Step {
     #[must_use]
     pub fn title(self) -> &'static str {
         match self {
-            Self::Preflight => "Devices",
-            Self::Calibration => "Calibration",
-            Self::MicGain => "Mic gain",
+            Self::Setup => "Setup",
             Self::Level => "Level",
             Self::Measure => "Measure",
             Self::Result => "Result",
@@ -115,8 +108,11 @@ impl Step {
 /// Calibration download progress.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CalStatus {
+    /// Nothing downloaded in this run (a saved file may be loaded).
     Idle,
     Downloading,
+    /// Downloaded from miniDSP in this run, and saved.
+    Downloaded,
     Failed(String),
 }
 
@@ -128,6 +124,8 @@ pub struct SaveState {
     pub applied: Option<Applied>,
     /// Verified against predicted, per channel.
     pub verify: Option<[VerifyResult; 2]>,
+    /// What rolling the EQ host back did (the EQ is no longer applied).
+    pub rolled_back: Option<String>,
 }
 
 /// How a verification sweep compares with the prediction in the corrected range,
@@ -193,8 +191,12 @@ pub struct App {
     pub cal_path: Option<PathBuf>,
     pub cal_status: CalStatus,
     cal_rx: Option<Receiver<Result<(Calibration, PathBuf)>>>,
+    /// Enter was pressed before the calibration arrived: setup continues when it does.
+    pub continue_after_download: bool,
 
     pub mic_gain: Option<InputGain>,
+    /// The EQ host being bypassed beside the screen, after setup.
+    eq_bypass_job: Option<Receiver<Result<()>>>,
 
     pub level: LevelState,
     pub measure: MeasureState,
@@ -211,10 +213,55 @@ pub struct App {
     room_job: Option<Receiver<(usize, Vec<crate::dsp::roommodel::Guess>)>>,
     /// True when keys changed the room screen since it was last worked out.
     room_stale: bool,
+    /// The speaker the room screen and the decay view show (0 left, 1 right).
     pub view_channel: usize,
+    /// The channels the response charts show (measure, result, save).
+    pub shown: Shown,
 
     pub save: SaveState,
     session: Option<Session>,
+}
+
+/// Which channels the response charts show: both, or one of them. Tab steps through them on
+/// the measure, result and save screens, and the choice stays from one screen to the next.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Shown {
+    #[default]
+    Both,
+    Left,
+    Right,
+}
+
+impl Shown {
+    /// The next one for Tab: both, the left only, the right only, both again.
+    #[must_use]
+    pub fn next(self) -> Self {
+        match self {
+            Self::Both => Self::Left,
+            Self::Left => Self::Right,
+            Self::Right => Self::Both,
+        }
+    }
+
+    /// The channels shown, left first (0 left, 1 right).
+    #[must_use]
+    pub fn channels(self) -> &'static [usize] {
+        match self {
+            Self::Both => &[0, 1],
+            Self::Left => &[0],
+            Self::Right => &[1],
+        }
+    }
+}
+
+impl Drop for App {
+    /// A bypass still under way finishes first, so what it changes is registered before the
+    /// system is restored.
+    fn drop(&mut self) {
+        if let Some(job) = self.eq_bypass_job.take() {
+            let _ = crate::background::wait(&job);
+        }
+    }
 }
 
 impl std::fmt::Debug for App {
@@ -272,7 +319,7 @@ impl App {
             .find(|(_, info)| info.simulated == simulated)
             .map(|(_, info)| info.sink);
         let mut app = Self {
-            step: Step::Preflight,
+            step: Step::Setup,
             quit: false,
             options,
             env,
@@ -295,7 +342,9 @@ impl App {
             cal_path: None,
             cal_status: CalStatus::Idle,
             cal_rx: None,
+            continue_after_download: false,
             mic_gain: None,
+            eq_bypass_job: None,
             level: LevelState::new(),
             measure: MeasureState::new(),
             placement: None,
@@ -306,6 +355,7 @@ impl App {
             room_job: None,
             room_stale: false,
             view_channel: 0,
+            shown: Shown::Both,
             save: SaveState::default(),
             session: None,
         };
@@ -314,6 +364,9 @@ impl App {
         {
             app.cal = Some(config.calibration());
             app.serial_input = "7000000".into();
+        }
+        if app.options.review.is_none() {
+            app.load_saved_calibration();
         }
         app.poll_devices();
         if let Some(old) = app.config.room.take()
@@ -480,14 +533,12 @@ impl App {
 
     fn enter_step(&mut self) {
         match self.step {
-            Step::MicGain => self.read_mic_gain(),
+            Step::Setup => self.read_mic_gain(),
             Step::Level => {
                 let volume = self.current_sink_volume();
                 self.level.enter(volume);
-                if let Some(audio) = self.audio.as_mut()
-                    && let Err(e) = self.level.start_listening(audio.as_mut())
-                {
-                    self.set_error(&e);
+                if !self.bypassing_eq() {
+                    self.start_listening();
                 }
             }
             Step::Result => {
@@ -496,6 +547,15 @@ impl App {
             }
             Step::Save => self.write_outputs(),
             _ => {}
+        }
+    }
+
+    /// Listens to the room, the level step's start.
+    fn start_listening(&mut self) {
+        if let Some(audio) = self.audio.as_mut()
+            && let Err(e) = self.level.start_listening(audio.as_mut())
+        {
+            self.set_error(&e);
         }
     }
 
@@ -519,7 +579,6 @@ impl App {
         if self.placement.is_some() && self.key_placement(key.code) {
             return;
         }
-        let typing = self.step == Step::Calibration && self.cal_status != CalStatus::Downloading;
         match key.code {
             KeyCode::Char('i') => {
                 self.open_overlay(Overlay::Info { technical: false });
@@ -534,7 +593,7 @@ impl App {
                 }
                 return;
             }
-            KeyCode::Char('w') if !typing => {
+            KeyCode::Char('w') => {
                 if self.measure.positions.iter().any(|p| !p.is_empty()) {
                     if self.measure.positions[self.view_channel].is_empty() {
                         self.view_channel = 1 - self.view_channel;
@@ -556,7 +615,7 @@ impl App {
                 }
                 return;
             }
-            KeyCode::Char('q') if !typing => {
+            KeyCode::Char('q') => {
                 self.quit = true;
                 return;
             }
@@ -566,7 +625,7 @@ impl App {
                 return;
             }
             KeyCode::Esc => {
-                if self.step != Step::Preflight {
+                if self.step != Step::Setup {
                     let prev = self.step.prev();
                     self.go(prev);
                 }
@@ -575,13 +634,20 @@ impl App {
             _ => {}
         }
         match self.step {
-            Step::Preflight => self.key_preflight(key.code),
-            Step::Calibration => self.key_calibration(key.code),
-            Step::MicGain => self.key_mic_gain(key.code),
+            Step::Setup => self.key_setup(key.code),
             Step::Level => self.key_level(key.code),
             Step::Measure => self.key_measure(key.code),
             Step::Result => self.key_result(key.code),
             Step::Save => self.key_save(key.code),
+        }
+    }
+
+    /// Tab on a screen of response charts: the next channels. The decay view, opened from
+    /// there, then starts on the one channel shown.
+    pub(super) fn show_next_channels(&mut self) {
+        self.shown = self.shown.next();
+        if let [c] = self.shown.channels() {
+            self.view_channel = *c;
         }
     }
 
@@ -635,19 +701,20 @@ impl App {
 
     /// Advances background work: device polling, downloads, audio streams.
     pub fn tick(&mut self) {
+        self.poll_eq_bypass();
         self.poll_design();
         self.collect_room_guess(false);
         self.settle_room();
         match self.step {
-            Step::Preflight => {
+            Step::Setup => {
                 let due = self
                     .last_poll
                     .is_none_or(|t| t.elapsed() > Duration::from_secs(1));
                 if due && self.mic().is_none() {
                     self.poll_devices();
                 }
+                self.poll_download();
             }
-            Step::Calibration => self.poll_download(),
             Step::Level => {
                 let scale = self.spl_scale();
                 self.level.tick(scale, self.cal.as_ref());

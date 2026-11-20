@@ -17,11 +17,6 @@ pub const SLICE_STEP_MS: f64 = 20.0;
 pub const SLICES: usize = 21;
 /// Length of the analysis window that slides along the impulse response, ms.
 const WINDOW_MS: f64 = 300.0;
-/// A rough waterfall, from an impulse response only a third of a second long (a short
-/// looped sweep): a 120 ms window and slices to 120 ms, so the last window ends before the
-/// sweep's distortion, which wraps around to the end of the loop, about 270 ms in.
-const SHORT_WINDOW_MS: f64 = 120.0;
-const SHORT_SLICES: usize = 7;
 /// Its rising edge, ms. A short edge cuts into a ringing note mid-cycle and spreads its
 /// energy over neighbouring frequencies, which then seem to ring too; 30 ms keeps that
 /// spread within about a third of an octave at 100 Hz.
@@ -59,15 +54,6 @@ impl Waterfall {
     #[must_use]
     pub fn new(ir: &[f64], peak: usize, rate: f64) -> Self {
         Self::with_window(ir, peak, rate, WINDOW_MS, SLICES)
-    }
-
-    /// A rough waterfall from a short circular impulse response (a third of a second): a
-    /// shorter window, so coarser in frequency (about 8 Hz), and only the first 120 ms. A
-    /// room ringing longer than the loop also wraps around into it, so the longest notes
-    /// look as if they faded less than they do.
-    #[must_use]
-    pub fn short(ir: &[f64], peak: usize, rate: f64) -> Self {
-        Self::with_window(ir, peak, rate, SHORT_WINDOW_MS, SHORT_SLICES)
     }
 
     fn with_window(ir: &[f64], peak: usize, rate: f64, window_ms: f64, slices: usize) -> Self {

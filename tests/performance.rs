@@ -40,8 +40,8 @@ const STEADY_FRAME_MS: f64 = 40.0;
 /// A frame whose charts changed: drawn, compressed and encoded (2–3.5 yardsticks; a sort
 /// per pixel of the room's floor, as once happened, made it 13).
 const CHANGED_FRAMES: f64 = 8.0;
-/// A placement frame: its curve and waterfall drawn anew for every update, ten times a
-/// second on the fastest sweeps (about 2.6 yardsticks).
+/// A placement frame: its curve and waterfall drawn anew for every update, five times a
+/// second on fast sweeps (about 2.6 yardsticks).
 const PLACEMENT_FRAMES: f64 = 6.0;
 /// Background work after a key: the new design (100–200 ms).
 const DESIGN_MS: f64 = 4000.0;
@@ -86,14 +86,13 @@ impl Screen {
     }
 }
 
-/// Placement on the fastest sweeps: every update's frame, drawn while the sweep loops.
+/// Placement on fast sweeps: every update's frame, drawn while the sweep loops.
 fn placement(app: &mut App, unit: f64) {
     let mut screen = Screen::new();
     press(app, KeyCode::Char('p'));
     press(app, KeyCode::Char('m'));
-    press(app, KeyCode::Char('m'));
     let count = |a: &App| a.placement.as_ref().map_or(0, |p| p.count);
-    tick_until(app, "fastest sweeps", Duration::from_secs(20), |a| {
+    tick_until(app, "fast sweeps", Duration::from_secs(20), |a| {
         count(a) >= 3
     });
     let (mut slowest, mut most, mut frames) = (0f64, 0usize, 0);

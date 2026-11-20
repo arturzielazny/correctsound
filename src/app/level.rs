@@ -1,4 +1,4 @@
-//! Step 4: listening to the room's background noise, which sets how loud the measurement
+//! Step 2: listening to the room's background noise, which sets how loud the measurement
 //! needs to be ([`crate::dsp::ambient`]), then pink noise per channel with a live SPL meter
 //! for setting the amplifier to that level. The step's state, its keys and its background work.
 
@@ -18,6 +18,11 @@ use crate::dsp::noise::pink_band;
 /// Level for the noise before the room has been listened to (sessions saved before the
 /// level was worked out from the room), dB SPL.
 pub const DEFAULT_TARGET_SPL: f64 = 75.0;
+/// How long a change of the suggested level is pointed out, s.
+const CHANGE_SHOWN_SECS: usize = 6;
+/// A reading raised by this much by the room's background is worth a word, dB: a quarter of
+/// the green zone.
+pub const NOTICEABLE_DB: f64 = 0.4;
 /// Green zone half-width, dB.
 pub const TOLERANCE: f64 = 1.5;
 /// Playback stops above this, dB SPL.
@@ -99,8 +104,15 @@ pub struct LevelState {
     pub target_spl: f64,
     /// The room's background per octave ([`OCTAVES`]), dB SPL, corrected for the mic.
     pub room_noise: Option<OctaveLevels>,
+    /// The same right now (the latest half second), dB SPL: it moves while the steady level
+    /// holds still.
+    pub room_noise_now: Option<OctaveLevels>,
     /// The measurement level the room's background calls for, while listening.
     pub suggestion: Option<Suggestion>,
+    /// The suggestion before it last changed, dB SPL, and when it changed (samples listened).
+    pub suggestion_was: Option<(f64, usize)>,
+    /// Samples listened to since listening started.
+    listened: usize,
     /// Background noise in the meter's band, dB SPL.
     pub ambient_spl: Option<f64>,
     /// Averaged SPL of the current noise.
@@ -143,7 +155,10 @@ impl LevelState {
             phase: LevelPhase::Idle,
             target_spl: DEFAULT_TARGET_SPL,
             room_noise: None,
+            room_noise_now: None,
             suggestion: None,
+            suggestion_was: None,
+            listened: 0,
             ambient_spl: None,
             spl: None,
             heard: [None, None],
@@ -179,7 +194,10 @@ impl LevelState {
         self.band.reset();
         self.listener.reset();
         self.room_noise = None;
+        self.room_noise_now = None;
         self.suggestion = None;
+        self.suggestion_was = None;
+        self.listened = 0;
         self.settle = LISTEN_SETTLE;
         self.stream =
             Some(audio.start(Source::new(Program::Silence, self.channel), Route::Hardware)?);
@@ -191,6 +209,20 @@ impl LevelState {
     #[must_use]
     pub fn listened_secs(&self) -> f64 {
         self.listener.heard_secs()
+    }
+
+    /// Seconds listened to since listening started (not only the 3 s that count).
+    #[must_use]
+    pub fn listening_secs(&self) -> f64 {
+        self.listened as f64 / f64::from(SAMPLE_RATE)
+    }
+
+    /// The suggestion before its latest change, dB SPL, for a few seconds after it changed.
+    #[must_use]
+    pub fn recent_change(&self) -> Option<f64> {
+        self.suggestion_was
+            .filter(|&(_, at)| self.listened - at < SAMPLE_RATE as usize * CHANGE_SHOWN_SECS)
+            .map(|(was, _)| was)
     }
 
     /// True when the noise may start: the room has been heard long enough for a
@@ -274,19 +306,26 @@ impl LevelState {
                 let skip = self.settle.min(samples.len());
                 self.settle -= skip;
                 let samples = &samples[skip..];
+                self.listened += samples.len();
                 let filtered = self.band.process(samples);
                 self.ambient.extend_from_slice(&filtered);
                 if self.ambient.len() > AMBIENT_KEEP {
                     self.ambient.drain(..self.ambient.len() - AMBIENT_KEEP);
                 }
                 self.listener.push(samples);
-                if let Some(dbfs) = self.listener.steady_dbfs() {
-                    let raw = dbfs.map(|d| scale.spl(d));
-                    let mut shown = raw;
-                    for (level, &f) in shown.iter_mut().zip(&OCTAVES) {
+                let corrected = |dbfs: OctaveLevels| {
+                    let mut spl = dbfs.map(|d| scale.spl(d));
+                    for (level, &f) in spl.iter_mut().zip(&OCTAVES) {
                         *level -= cal.map_or(0.0, |c| c.db_at(f));
                     }
-                    self.room_noise = Some(shown);
+                    spl
+                };
+                if let Some(dbfs) = self.listener.latest_dbfs() {
+                    self.room_noise_now = Some(corrected(dbfs));
+                }
+                if let Some(dbfs) = self.listener.steady_dbfs() {
+                    let raw = dbfs.map(|d| scale.spl(d));
+                    self.room_noise = Some(corrected(dbfs));
                     // The margin is worked out on the raw recording, like the check after
                     // each sweep, so the suggestion uses the uncorrected levels.
                     let new = Suggestion::for_noise(&raw);
@@ -295,6 +334,11 @@ impl LevelState {
                             && new.level_spl > old.level_spl - SUGGESTION_HYSTERESIS_DB
                     });
                     if !keep {
+                        if let Some(old) = self.suggestion
+                            && old.level_spl.round() != new.level_spl.round()
+                        {
+                            self.suggestion_was = Some((old.level_spl, self.listened));
+                        }
                         self.suggestion = Some(new);
                     }
                 }
@@ -333,11 +377,23 @@ impl LevelState {
         }
     }
 
-    /// True when the room's noise in the meter's band is within 25 dB of the target, so
-    /// the meter reads it along with the noise.
+    /// How much the room's own background in the meter's band raises a reading at the
+    /// target, dB: the meter hears both, and their powers add (24 dB under the target adds
+    /// 0.02 dB, 10 dB under adds 0.4).
+    #[must_use]
+    pub fn background_raises_db(&self) -> Option<f64> {
+        let a = self.ambient_spl?;
+        Some(crate::dsp::power_to_db(
+            1.0 + crate::dsp::db_to_power(a - self.target_spl),
+        ))
+    }
+
+    /// True when the room's background raises the reading enough to matter: by
+    /// [`NOTICEABLE_DB`] or more (within about 10 dB of the target).
     #[must_use]
     pub fn room_is_noisy(&self) -> bool {
-        self.ambient_spl.is_some_and(|a| a > self.target_spl - 25.0)
+        self.background_raises_db()
+            .is_some_and(|d| d >= NOTICEABLE_DB)
     }
 
     /// True when the noise plays but the meter reads hardly more than the room's own
@@ -433,6 +489,24 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_background_matters_only_close_to_the_level() {
+        let mut l = LevelState::new();
+        l.target_spl = 68.0;
+        assert_eq!(l.background_raises_db(), None);
+        assert!(!l.room_is_noisy());
+        // 24 dB under the level: the meter reads 0.02 dB high, nothing to mention.
+        l.ambient_spl = Some(44.0);
+        let raises = l.background_raises_db().expect("heard");
+        assert!((raises - 0.017).abs() < 0.002, "{raises}");
+        assert!(!l.room_is_noisy());
+        // 10 dB under: 0.4 dB high, worth a word.
+        l.ambient_spl = Some(58.0);
+        let raises = l.background_raises_db().expect("heard");
+        assert!((raises - 0.41).abs() < 0.01, "{raises}");
+        assert!(l.room_is_noisy());
+    }
 
     #[test]
     fn louder_than_needed_is_fine_until_it_gets_loud() {

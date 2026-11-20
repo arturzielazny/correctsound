@@ -218,28 +218,8 @@ pub struct Shade {
     pub to_hz: f64,
 }
 
-/// Draws curves on a 20 Hz – 20 kHz log axis with a dB grid, in a titled box; the dB
-/// range covers the curves.
-pub fn draw(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    title: &str,
-    curves: &[Curve],
-    shades: &[Shade],
-    gfx: &mut Graphics,
-) {
-    draw_with_range(
-        frame,
-        area,
-        title,
-        curves,
-        shades,
-        y_range(curves, FULL),
-        gfx,
-    );
-}
-
-/// [`draw`] with a given dB range. Curves with an empty label stay out of the legend.
+/// Draws curves on a 20 Hz – 20 kHz log axis with a dB grid, in a titled box, over the
+/// given dB range. Curves with an empty label stay out of the legend.
 pub fn draw_with_range(
     frame: &mut Frame<'_>,
     area: Rect,

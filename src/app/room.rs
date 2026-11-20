@@ -535,6 +535,17 @@ impl RoomState {
             .as_ref()
             .filter(|d| Some(d.setup) == self.setup())
     }
+
+    /// What to draw: [`Self::current`], or while a key's change is worked out (once per
+    /// frame, so a frame can come first) the last one, if the new setup is a room at all.
+    #[must_use]
+    pub fn shown(&self) -> Option<&Derived> {
+        self.current().or_else(|| {
+            self.derived
+                .as_ref()
+                .filter(|_| self.setup().is_some_and(|s| s.room.is_valid()))
+        })
+    }
 }
 
 /// Works out everything the model says about `setup`.

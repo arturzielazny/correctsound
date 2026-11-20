@@ -19,6 +19,10 @@ pub struct SimSystem {
     /// The simulated input volume; starts off unity so the gain screen has work to do.
     input_volume: f64,
     bypass: bool,
+    /// The bypass before the app first changed it.
+    original_bypass: Option<bool>,
+    /// The EQ host as it was before the first apply (its EQ and bypass), for a roll-back.
+    before_apply: Option<(Option<EqSet>, bool)>,
 }
 
 impl SimSystem {
@@ -29,6 +33,8 @@ impl SimSystem {
             state,
             input_volume: 0.42,
             bypass: false,
+            original_bypass: None,
+            before_apply: None,
         }
     }
 
@@ -131,9 +137,11 @@ impl System for SimSystem {
         Ok(Some(self.bypass))
     }
 
-    fn set_eq_bypass(&mut self, bypass: bool) -> Result<()> {
+    fn bypass_eq(&mut self, bypass: bool) -> super::Job {
+        // The simulator answers at once: done here, nothing left for the job.
+        self.original_bypass.get_or_insert(self.bypass);
         self.bypass = bypass;
-        Ok(())
+        Box::new(|| Ok(()))
     }
 
     fn audio(&mut self, _mic: &Device, sink: &Device) -> Box<dyn AudioBackend> {
@@ -151,6 +159,10 @@ impl System for SimSystem {
     }
 
     fn apply_eq(&mut self, eq: &EqSet, backup_parent: &Path, sink: &Device) -> Result<Applied> {
+        if self.before_apply.is_none() {
+            let eq = self.lock().eq.clone();
+            self.before_apply = Some((eq, self.original_bypass.unwrap_or(self.bypass)));
+        }
         self.lock().eq = Some(eq.clone());
         self.bypass = false;
         let path = backup_parent.join("CorrectSound.json");
@@ -164,5 +176,23 @@ impl System for SimSystem {
             backup_dir: backup_parent.join("easyeffects-backup (simulated, nothing changed)"),
             autoload: Some(sink.description.clone()),
         })
+    }
+
+    fn undo_eq(&mut self, applied: &Applied) -> Result<String> {
+        let Some((eq, bypass)) = self.before_apply.take() else {
+            anyhow::bail!("nothing has been installed to roll back");
+        };
+        let had_eq = eq.is_some();
+        self.lock().eq = eq;
+        self.bypass = bypass;
+        Ok(format!(
+            "The simulated EQ host is back to how it was: {}. {} stays in its list.",
+            if had_eq {
+                "its earlier EQ loaded"
+            } else {
+                "no EQ"
+            },
+            applied.preset_name
+        ))
     }
 }

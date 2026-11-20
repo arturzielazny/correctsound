@@ -40,36 +40,37 @@ fn simple_lines() -> Vec<Line<'static>> {
         gap(),
         h("The steps"),
         p(
-            "1 Devices: finds the mic and the output your EQ program (EasyEffects on Linux) plays \
-           to. The EQ program is paused while measuring, so the bare speakers are measured.",
+            "1 Setup: finds the mic and the output your EQ program (EasyEffects on Linux) plays \
+           to; the EQ program is paused while measuring, so the bare speakers are measured. \
+           Every UMIK-1 is slightly different, and its own correction file from miniDSP \
+           removes the mic's colouring: type the serial number once, and the file is saved. \
+           The calibration assumes the mic signal is not amplified, so the mic's gain is set \
+           to unity. Everything is remembered: next time it is one Enter.",
         ),
         p(
-            "2 Calibration: every UMIK-1 is slightly different; its own correction file, from \
-           miniDSP, removes the mic's colouring.",
-        ),
-        p("3 Mic gain: the calibration assumes the mic signal is not amplified; this checks it."),
-        p(
-            "4 Level: first CorrectSound listens to the room's background noise and works out \
+            "2 Level: first CorrectSound listens to the room's background noise and works out \
            how loud the measurement must be to stay well above it, often only 60 dB. Then pink \
            noise plays while you turn the amplifier to that level.",
         ),
         p(
-            "5 Measure: a sweep, a tone gliding from 10 Hz to 22 kHz, plays from each speaker. \
+            "3 Measure: a sweep, a tone gliding from 10 Hz to 22 kHz, plays from each speaker. \
            From the recording the app computes how loud every frequency arrives. Measuring a \
            few mic positions around your head is worth it: the room sounds different 20 cm \
            away, and averaging keeps what is common to all of them.",
         ),
         p(
-            "6 Result: the measurement is compared with a target: even, gently sloping down \
+            "4 Result: the measurement is compared with a target: even, gently sloping down \
            towards the treble, the balance a good speaker has in a real room. The app finds \
            filters that bring the measurement closer to it, and chooses how many by checking \
            which ones keep helping at mic positions they were not fitted to.",
         ),
         p(
-            "7 Save: writes the files, loads them into the EQ program as a preset (it also loads \
+            "5 Save: writes the files, loads them into the EQ program as a preset (it also loads \
            automatically from then on), and can play the sweeps again through it to verify the \
            result. With several mic positions, put the mic back at the first one first: the \
-           comparison is made for that spot, since one spot differs from their average.",
+           comparison is made for that spot, since one spot differs from their average. Then \
+           keep it, or roll the EQ program back to how it was (u); the preset stays in its \
+           list.",
         ),
         gap(),
         h("Placement and room treatment (p on the measure step)"),
@@ -81,15 +82,12 @@ fn simple_lines() -> Vec<Line<'static>> {
            dips EQ cannot fill.",
         ),
         p(
-            "Three ways to measure, switched with m. Sweeps: a short sweep every couple of \
+            "Two ways to measure, switched with m. Sweeps: a short sweep every couple of \
            seconds, with fine detail and a waterfall of how the bass decays; bass traps show \
            best there, as notes that stop ringing sooner (keep still while a sweep plays). \
            Fast sweeps: a one-second sweep over and over without pauses, the curve and the \
-           waterfall updated five times a second; a change shows within a second. Fastest \
-           sweeps: a third-of-a-second sweep over and over, the curve updated ten times a \
-           second; it follows any change within about half a second, so you can watch it \
-           while you carry a trap. Its waterfall is only rough (the first 120 ms, coarse in \
-           frequency): the room rings longer than one sweep.",
+           waterfall updated five times a second; a change shows within a second, so you \
+           can watch it while you carry a trap.",
         ),
         p(
             "A big number beside the text says how much more even than the pinned reading the \
@@ -288,30 +286,17 @@ fn technical_lines() -> Vec<Line<'static>> {
            Decay below), and the notes that ring longest are compared with the pinned sweep.",
         ),
         p(
-            "Fastest sweeps: a logarithmic sweep, 15–600 Hz, peaking at the sweep level, \
-           filling one period of 2^14 samples (0.34 s) played in a loop. Every frequency in \
-           it is a multiple of the \
-           loop rate (2.9 Hz), so once the room has settled any one period of the recording \
-           gives |H|² = |Y|²/|X|² exactly at those frequencies, whatever its start: no \
-           alignment with playback, and powers rather than phases, so the mic's own USB clock \
-           does not matter. Recomputed from the latest period every 4800 recorded samples \
-           (0.1 s), averaged half and half with the previous result, shown at 1/12 octave. \
-           A change shows in about 0.6 s: one period plus the room's decay plus the average. \
-           The rough waterfall comes from the circular impulse response of the same period: a \
-           120 ms window, slices to 120 ms, ending before the sweep's distortion wraps around \
-           to the end of the loop; a tail longer than the loop adds onto it. \
-           The score is computed at 1/24 octave in every mode.",
-        ),
-        p(
-            "Fast sweeps: a logarithmic sweep, 10 Hz to 1 kHz, filling a period of 49152 \
-           samples (1.02 s) and looped, the jump at the loop point faded over 5 ms. The same \
-           periodic trick gives the impulse response by circular deconvolution, \
-           IFFT(Y·X*/|X|²) with a third-octave fade outside the band, from the latest period \
-           every 9600 recorded samples (0.2 s). It goes through the same window and waterfall \
-           as a single sweep. The period is as short as the waterfall allows: it needs 0.7 s \
-           after the direct sound, and the sweep's harmonic distortion wraps around to \
-           0.15 s before it. In the simulator it matches single sweeps exactly and shows a \
-           change in 1.3 s.",
+            "Fast sweeps: a logarithmic sweep, 10 Hz to 1 kHz, peaking at the sweep level, \
+           filling a period of 49152 samples (1.02 s) and looped, the jump at the loop point \
+           faded over 5 ms. Every frequency in it is a multiple of the loop rate, so once the \
+           room has settled any one period of the recording gives the impulse response by \
+           circular deconvolution, IFFT(Y·X*/|X|²) with a third-octave fade outside the \
+           band, whatever the period's start: no alignment with playback. Recomputed from \
+           the latest period every 9600 recorded samples (0.2 s), through the same window and \
+           waterfall as a single sweep. The period is as short as the waterfall allows: it \
+           needs 0.7 s after the direct sound, and the sweep's harmonic distortion wraps \
+           around to 0.15 s before it. In the simulator it matches single sweeps exactly and \
+           shows a change in 1.3 s. The score is computed at 1/24 octave in both modes.",
         ),
         gap(),
         h("Decay"),

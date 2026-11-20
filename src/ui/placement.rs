@@ -47,10 +47,6 @@ pub(super) fn placement(
             "A one-second sweep in a loop, updated five times a second: a change shows within a \
              second, decay included."
         }
-        Mode::Fastest => {
-            "A third-of-a-second sweep in a loop, updated ten times a second: it follows a bass \
-             trap as you carry it. Its waterfall is only rough."
-        }
     };
     let mut lines = vec![
         Line::from(
@@ -62,10 +58,7 @@ pub(super) fn placement(
     ];
     // The modes, the current one lit, and what it does.
     let mut modes = vec![Span::raw("Mode (m): ")];
-    for (i, m) in [Mode::Sweeps, Mode::Fast, Mode::Fastest]
-        .into_iter()
-        .enumerate()
-    {
+    for (i, m) in [Mode::Sweeps, Mode::Fast].into_iter().enumerate() {
         if i > 0 {
             modes.push(dim(" · "));
         }
@@ -134,19 +127,8 @@ pub(super) fn placement(
         None => Line::from(dim("Pinned: nothing yet; Space pins the latest reading")),
     });
     let latest_decay = p.latest.as_ref().and_then(|r| r.waterfall.as_ref());
-    let rough = p.latest.as_ref().is_some_and(|r| r.mode == Mode::Fastest);
     lines.push(match latest_decay {
-        Some(_) if rough => Line::from(dim(
-            "Decay: rough in this mode (the loop is shorter than the room rings); fast sweeps \
-             give ringing times",
-        )),
-        Some(w) => decay_line(
-            w,
-            p.reference
-                .as_ref()
-                .filter(|r| r.mode != Mode::Fastest)
-                .and_then(|r| r.waterfall.as_ref()),
-        ),
+        Some(w) => decay_line(w, p.reference.as_ref().and_then(|r| r.waterfall.as_ref())),
         None => Line::from(dim("Decay: after the first reading")),
     });
     // Problems stay a few seconds (see PlacementState::report); otherwise a quiet all-clear.
@@ -213,11 +195,7 @@ pub(super) fn placement(
         plot::draw_decay(
             frame,
             area,
-            if rough {
-                "How the bass fades: rough, the first 120 ms"
-            } else {
-                "How the bass fades, latest sweep"
-            },
+            "How the bass fades, latest sweep",
             plot::Decay {
                 times_ms: &w.times_ms,
                 freqs: &w.freqs,

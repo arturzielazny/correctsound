@@ -98,7 +98,7 @@ without sound.
 I don't use EasyEffects. Add an output for <CamillaDSP / a PipeWire filter-chain module>:
 generate its configuration from the EqSet (src/eq), install and load it the way
 src/platform/linux/easyeffects.rs does for EasyEffects (back up, apply, autoload, restore), and let
-the user pick the output in step 1 when both are available. Verification (the `v` key) must
+the user pick the output in setup when both are available. Verification (the `v` key) must
 measure through the new path.
 ```
 

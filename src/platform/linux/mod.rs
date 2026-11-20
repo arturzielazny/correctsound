@@ -8,10 +8,11 @@ pub mod pw_cat;
 
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result, bail};
 
-use super::{Applied, Device, Devices, EqHost, GainSetting, InputGain, Routing, System};
+use super::{Applied, Device, Devices, EqHost, GainSetting, InputGain, Job, Routing, System};
 use crate::audio::{AudioBackend, Route};
 use crate::eq::EqSet;
 
@@ -41,7 +42,12 @@ pub fn run(prog: &str, args: &[&str]) -> Result<String> {
 
 /// The real Linux system.
 #[derive(Debug, Default)]
-pub struct Linux;
+pub struct Linux {
+    /// EasyEffects' bypass before the app first changed it (set by a job beside the screen).
+    original_bypass: Arc<Mutex<Option<bool>>>,
+    /// EasyEffects before the first apply, for a roll-back.
+    before_apply: Option<easyeffects::Before>,
+}
 
 impl Linux {
     fn pipewire_volume(sink: &Device) -> Result<(f64, bool)> {
@@ -180,12 +186,19 @@ impl System for Linux {
         easyeffects::bypass()
     }
 
-    fn set_eq_bypass(&mut self, bypass: bool) -> Result<()> {
-        if let Some(current) = easyeffects::bypass()? {
-            let arg = if current { "1" } else { "2" };
-            crate::restore::register_command("easyeffects-bypass", &["easyeffects", "-b", arg]);
-        }
-        easyeffects::set_bypass(bypass)
+    fn bypass_eq(&mut self, bypass: bool) -> Job {
+        let original = Arc::clone(&self.original_bypass);
+        Box::new(move || {
+            if let Some(current) = easyeffects::bypass()? {
+                original
+                    .lock()
+                    .expect("bypass lock poisoned")
+                    .get_or_insert(current);
+                let arg = if current { "1" } else { "2" };
+                crate::restore::register_command("easyeffects-bypass", &["easyeffects", "-b", arg]);
+            }
+            easyeffects::set_bypass(bypass)
+        })
     }
 
     fn audio(&mut self, mic: &Device, sink: &Device) -> Box<dyn AudioBackend> {
@@ -219,6 +232,36 @@ impl System for Linux {
                 description: sink.description.clone(),
                 route,
             });
-        easyeffects::apply(eq, backup_parent, target.as_ref())
+        let original_bypass = *self.original_bypass.lock().expect("bypass lock poisoned");
+        let before = match self.before_apply.take() {
+            Some(before) => before,
+            None => easyeffects::Before {
+                preset: easyeffects::last_output_preset(),
+                bypass: match original_bypass {
+                    Some(b) => Some(b),
+                    None => easyeffects::bypass()?,
+                },
+                autoload: None,
+            },
+        };
+        let (applied, file) = match easyeffects::apply(eq, backup_parent, target.as_ref()) {
+            Ok(done) => done,
+            Err(e) => {
+                self.before_apply = Some(before);
+                return Err(e);
+            }
+        };
+        self.before_apply = Some(easyeffects::Before {
+            autoload: before.autoload.or(file),
+            ..before
+        });
+        Ok(applied)
+    }
+
+    fn undo_eq(&mut self, applied: &Applied) -> Result<String> {
+        let Some(before) = self.before_apply.take() else {
+            bail!("nothing has been installed to roll back");
+        };
+        easyeffects::undo(&before, applied).inspect_err(|_| self.before_apply = Some(before))
     }
 }

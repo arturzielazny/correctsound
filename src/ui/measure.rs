@@ -1,4 +1,4 @@
-//! Step 5's screen: the sweeps' progress and the measured response, each mic position
+//! Step 3's screen: the sweeps' progress and the measured response, each mic position
 //! faintly behind the average.
 
 use ratatui::Frame;
@@ -62,12 +62,13 @@ pub(super) fn measure(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Gr
             .wrap(Wrap { trim: true }),
         status,
     );
-    let mut curves = Vec::new();
-    // Each mic position faintly, behind the averages.
+    // Each mic position faintly, behind the averages; the channels shown (Tab) on the
+    // scale of both, so switching keeps it.
+    let mut curves: Vec<(Channel, Curve)> = Vec::new();
     for c in Channel::BOTH {
         if let Some(r) = &m.responses[c.index()] {
             for p in &r.positions_display {
-                curves.push(Curve::new("", Series::Position(c), &p.freqs, &p.db));
+                curves.push((c, Curve::new("", Series::Position(c), &p.freqs, &p.db)));
             }
         }
     }
@@ -76,20 +77,31 @@ pub(super) fn measure(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Gr
         (Channel::Right, Series::Right),
     ] {
         if let Some(r) = &m.responses[c.index()] {
-            curves.push(Curve::new(
-                c.name(),
-                series,
-                &r.display.freqs,
-                &r.display.db,
+            curves.push((
+                c,
+                Curve::new(c.name(), series, &r.display.freqs, &r.display.db),
             ));
         }
     }
+    let range = plot::y_range(
+        &curves
+            .iter()
+            .map(|(_, curve)| curve.clone())
+            .collect::<Vec<_>>(),
+        plot::FULL,
+    );
+    let shown = app.shown.channels();
+    let curves: Vec<Curve> = curves
+        .into_iter()
+        .filter(|(c, _)| shown.contains(&c.index()))
+        .map(|(_, curve)| curve)
+        .collect();
     let several = m
         .responses
         .iter()
         .flatten()
         .any(|r| !r.positions_display.is_empty());
-    plot::draw(
+    plot::draw_with_range(
         frame,
         plot_area,
         if several {
@@ -99,6 +111,7 @@ pub(super) fn measure(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Gr
         },
         &curves,
         &[],
+        range,
         gfx,
     );
 }

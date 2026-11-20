@@ -119,13 +119,12 @@ impl Window {
     }
 }
 
-/// Placement on the fastest sweeps in the window: every update's frame.
+/// Placement on fast sweeps in the window: every update's frame.
 fn placement(app: &mut App, window: &mut Window, unit: f64) {
     press(app, KeyCode::Char('p'));
     press(app, KeyCode::Char('m'));
-    press(app, KeyCode::Char('m'));
     let count = |a: &App| a.placement.as_ref().map_or(0, |p| p.count);
-    tick_until(app, "fastest sweeps", Duration::from_secs(20), |a| {
+    tick_until(app, "fast sweeps", Duration::from_secs(20), |a| {
         count(a) >= 3
     });
     let mut slowest = 0f64;

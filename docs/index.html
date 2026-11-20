@@ -253,6 +253,15 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
     <div class="eyebrow">What's new</div>
     <h2>Recent changes</h2>
     <dl class="changes">
+      <dt>20 Nov 2026</dt>
+      <dd><ul>
+        <li>Setup is one screen: the mic, its calibration, its gain and the output. Everything is remembered and the calibration file is saved after its first download, so on later runs it is one <kbd>Enter</kbd>, and it answers at once: pausing EasyEffects, which takes it a third of a second, happens while the next screen starts listening.</li>
+        <li>Listening to the room shows that it is live: a tick on each bar is the sound right now, the time keeps counting, and when the suggested level changes, it says from what and why.</li>
+        <li><kbd>Tab</kbd> on the measure, result and save screens shows both channels, the left only or the right only; side by side, both keep one scale.</li>
+        <li>Install, verify, then keep it or roll back: the save screen shows the three steps with their keys, and <kbd>u</kbd> puts EasyEffects back to how it was (the preset it had loaded, and what it loaded automatically).</li>
+        <li>Placement has two modes: sweeps and fast sweeps. Fastest sweeps are gone: fast sweeps follow a change within a second, at full detail and with a real waterfall.</li>
+        <li>Clearer colours while listening to the room: green means the room can be measured at a comfortable level (up to 75 dB), yellow loud, red too noisy. The warning about the room's background raising the meter's reading appears only when it does, by 0.4 dB or more, and says by how much.</li>
+      </ul></dd>
       <dt>18 Nov 2026</dt>
       <dd><ul>
         <li><b>Version 0.3.0.</b> The window is the default: <code>correctsound</code> opens in a window of its own. <code>--tty</code> keeps it in the terminal, and it stays there by itself where no window can be opened (no display or GPU, or a login over SSH). The single mic positions behind the measured average are now a faint haze instead of lines.</li>
@@ -310,15 +319,15 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
       </div>
       <div class="card">
         <div class="icon" style="background:rgba(187,154,247,.12)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#bb9af7" stroke-width="2"><path d="M5 13l4 4L19 7"/></svg></div>
-        <h3>Verifies the result</h3>
-        <p>Loads the preset into EasyEffects, sets it to load automatically, then plays the sweeps again through it and compares with what it predicted.</p>
+        <h3>Verifies the result, or rolls it back</h3>
+        <p>Loads the preset into EasyEffects, sets it to load automatically, then plays the sweeps again through it and compares with what it predicted. Not convinced? One key puts EasyEffects back as it was.</p>
       </div>
     </div>
     <div class="feature">
       <div class="icon" style="background:rgba(158,206,106,.16);width:46px;height:46px;border-radius:12px;display:grid;place-items:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9ece6a" stroke-width="2" stroke-linejoin="round"><path d="M3 3h18v18H3z" opacity=".45"/><path d="M3 3l8 0-8 8z" fill="rgba(158,206,106,.35)"/><path d="M14 17c1.5-4 3-4 4.5 0"/></svg></div>
       <div>
         <h3>Guides room treatment, live</h3>
-        <p>EQ can't fix everything in the bass; the room can. Live placement re-measures ten times a second while you move a bass trap, a speaker or your chair, and sweeps show how long each bass note rings, so you see what each change does before you commit to it. A big number readable from across the room says how much better it got, against the pinned curve kept on screen.</p>
+        <p>EQ can't fix everything in the bass; the room can. Live placement re-measures five times a second while you move a bass trap, a speaker or your chair, and sweeps show how long each bass note rings, so you see what each change does before you commit to it. A big number readable from across the room says how much better it got, against the pinned curve kept on screen.</p>
       </div>
       <a class="btn" href="#treatment">See it</a>
     </div>
@@ -441,29 +450,21 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
 <section id="tour">
   <div class="wrap">
     <div class="eyebrow">Tour</div>
-    <h2>Seven steps, one key each</h2>
+    <h2>Five steps, one key each</h2>
     <p class="lede">Every screen has one main action on <kbd>Enter</kbd>, <kbd>Esc</kbd> goes back, and <kbd>i</kbd> explains what is going on (<kbd>m</kbd> for the technical version). These screenshots are the real app, running against its built-in simulated room: <code>correctsound --simulate</code> works without any hardware.</p>
 
     <div class="steps">
       <div class="step">
         <div class="text">
           <div class="num">1</div>
-          <h3>Devices</h3>
-          <p>Finds the UMIK-1 and lists your outputs, with the one EasyEffects plays to already selected. It warns about apps that are playing, and pauses EasyEffects while measuring so the bare speakers are measured. Everything it changes is put back when it exits, even after a crash or a closed terminal.</p>
+          <h3>Setup</h3>
+          <p>One screen with everything ticked off: the UMIK-1, its calibration, its gain, EasyEffects, and your outputs with the one EasyEffects plays to already selected. The first time, type the serial printed on your mic, and its personal calibration file is downloaded from miniDSP and saved. The mic's input volume is set to exactly 1.0 in PipeWire and ALSA, because the calibration assumes nothing amplifies the signal on the way in. It warns about apps that are playing, and pauses EasyEffects while measuring so the bare speakers are measured. Everything is remembered, so the next time setup is one <kbd>Enter</kbd>; everything it changes is put back when it exits, even after a crash or a closed terminal.</p>
         </div>
-        <figure class="shot zoom"><img loading="lazy" src="img/1-devices.png" alt="Devices screen: mic found, EasyEffects running, output list"></figure>
+        <figure class="shot zoom"><img loading="lazy" src="img/1-setup.png" alt="Setup screen: mic and calibration ticked, mic gain to be set, EasyEffects running, output list"></figure>
       </div>
       <div class="step">
         <div class="text">
-          <div class="num">2–3</div>
-          <h3>Calibration and mic gain</h3>
-          <p>Type the serial printed on your mic, and its personal calibration file is downloaded from miniDSP and cached. Then the mic's input volume is set to exactly 1.0 in PipeWire and ALSA, because the calibration assumes nothing amplifies the signal on the way in.</p>
-        </div>
-        <figure class="shot zoom"><img loading="lazy" src="img/3-mic-gain.png" alt="Mic gain screen offering to set input volume to unity"></figure>
-      </div>
-      <div class="step">
-        <div class="text">
-          <div class="num">4</div>
+          <div class="num">2</div>
           <h3>Level</h3>
           <p>Keep quiet for a few seconds while CorrectSound listens to your room. You see the background noise in the bass, the mids and the highs, live, and the level the measurement needs to stay 30 dB above it in every octave. Traffic and ventilation rumble in the bass, so that is usually what decides. A quiet room is measured at a comfortable 60 dB; a noisy one asks for up to 80, or for a quieter moment. Then press Enter: pink noise plays from one speaker and you turn the amplifier until the meter shows that level. Louder is fine, up to a comfortable 85 dB: the sweeps only gain margin. Above 95 dB it stops by itself.</p>
         </div>
@@ -471,7 +472,7 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
       </div>
       <div class="step">
         <div class="text">
-          <div class="num">5</div>
+          <div class="num">3</div>
           <h3>Measure</h3>
           <p>A 5.5-second sweep plays from each speaker. Each recording is checked for clipping, for a missing sweep and for noise in every octave, and redone if needed. Moving the mic 20–30 cm and pressing <kbd>a</kbd> adds a position: the room sounds different a hand's width away, and averaging keeps only what is common to all of them.</p>
         </div>
@@ -479,7 +480,7 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
       </div>
       <div class="step">
         <div class="text">
-          <div class="num">6</div>
+          <div class="num">4</div>
           <h3>Result</h3>
           <p>The measurement, the target and the predicted result, with the equalizer drawn below: every filter on its own (cuts in red, boosts in green) and the whole thing. How many filters and how high to correct are chosen automatically; <kbd>t</kbd>, <kbd>h</kbd> and <kbd>f</kbd> override them and the design updates instantly.</p>
         </div>
@@ -487,9 +488,9 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
       </div>
       <div class="step">
         <div class="text">
-          <div class="num">7</div>
-          <h3>Save, apply, verify</h3>
-          <p><kbd>a</kbd> backs up your EasyEffects settings, installs the preset as <code>CoSo-001-DDMMYYYY</code>, loads it and makes it load automatically for that output. <kbd>v</kbd> plays the sweeps again, this time through EasyEffects, and compares the result with the prediction: the purple line should sit on the blue one. If you measured several mic positions, put the mic back at the first one: the comparison is made for that spot.</p>
+          <div class="num">5</div>
+          <h3>Install, verify, keep or roll back</h3>
+          <p>Three steps, each with its key on the screen. <kbd>a</kbd> backs up your EasyEffects settings, installs the preset as <code>CoSo-001-DDMMYYYY</code>, loads it and makes it load automatically for that output. <kbd>v</kbd> plays the sweeps again, this time through EasyEffects, and compares the result with the prediction: the purple line should sit on the blue one. If you measured several mic positions, put the mic back at the first one: the comparison is made for that spot. Then keep it (<kbd>Enter</kbd>), or <kbd>u</kbd> rolls EasyEffects back to how it was: the preset it had loaded and what it loaded automatically. The new preset stays in its list, to try again later.</p>
         </div>
         <figure class="shot zoom"><img loading="lazy" src="img/7-saved-verified.png" alt="Save screen showing the preset loaded and the verification matching the prediction within 0.2 dB"></figure>
       </div>
@@ -507,10 +508,9 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
       <h3 style="margin:0">Live placement and room treatment <kbd>p</kbd></h3>
       <p class="treat-lede">Walk around with a bass trap and <em>see what it does right away</em>.</p>
       <p>The bass at your seat is measured over and over, with one number for how uneven it is. Whatever changes the bass shows up straight away: a bass trap in a corner, a speaker 10 cm further from the wall, your chair moved forward. Pin one state with <kbd>Space</kbd> and compare everything else against it. Room treatment stops being guesswork and becomes a few minutes of trying.</p>
-      <p>Three ways to measure, all with sweeps, switched with <kbd>m</kbd>:</p>
-      <div class="grid g3" style="margin-top:14px">
-        <div class="card"><h3>Fastest sweeps</h3><p>A third-of-a-second bass sweep over and over, and the curve is recomputed ten times a second. It follows a change in about half a second, so you can watch it while you carry the trap around. Its waterfall is only a rough guide: the loop is shorter than the room rings.</p></div>
-        <div class="card"><h3>Fast sweeps</h3><p>A one-second sweep over and over without pauses. The curve and the waterfall of how the bass decays are recomputed five times a second, so a change shows within a second, ringing included.</p></div>
+      <p>Two ways to measure, both with sweeps, switched with <kbd>m</kbd>:</p>
+      <div class="grid g2" style="margin-top:14px">
+        <div class="card"><h3>Fast sweeps</h3><p>A one-second sweep over and over without pauses. The curve and the waterfall of how the bass decays are recomputed five times a second, so a change shows within a second, ringing included: fast enough to watch while you carry the trap around.</p></div>
         <div class="card"><h3>Sweeps</h3><p>A short sweep every couple of seconds: fine detail and the waterfall, from a sweep with silence around it. Keep still while it plays, then read how much shorter each note rings than in the pinned sweep.</p></div>
       </div>
       <p style="margin-top:18px">Whatever the mode, a <strong>big number</strong> says how many dB more even than the pinned state the bass is, large enough to read from the corner you're standing in, and the <strong>pinned curve</strong> stays on the chart behind the latest one.</p>
@@ -572,8 +572,8 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
           <ol class="howto">
             <li>Put the mic on its stand at your seat. It stays there the whole time. On the measure step, press <kbd>p</kbd>.</li>
             <li>Let a few sweeps run with the room as it is, then press <kbd>Space</kbd> to pin that curve. It is what everything else is compared with.</li>
-            <li>Press <kbd>m</kbd> until it says fastest sweeps, and carry the bass trap from corner to corner, watching the big number and the curve against the pinned one. It follows within about half a second.</li>
-            <li>Put the trap down where the number was highest and press <kbd>m</kbd> for sweeps (fast, or single for the finest detail): the decay line says which notes ring shorter than before. Try the wall behind the speakers, behind your seat, or two traps stacked.</li>
+            <li>Press <kbd>m</kbd> for fast sweeps, and carry the bass trap from corner to corner, watching the big number and the curve against the pinned one. It follows within a second.</li>
+            <li>Put the trap down where the number was highest: the decay line says which notes ring shorter than before (<kbd>m</kbd> again gives single sweeps, for the finest detail). Try the wall behind the speakers, behind your seat, or two traps stacked.</li>
             <li>Leave the trap where it helped most. Then run the normal measurement, so the EQ corrects what is left.</li>
           </ol>
           <p style="margin-top:16px"><kbd>Tab</kbd> switches speakers, and <kbd>s</kbd> pauses the sound while you carry something heavy.</p>
@@ -582,8 +582,6 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--m
         <div>
           <figure class="shot zoom"><img loading="lazy" src="img/5b-placement.png" alt="Placement screen in sweeps mode: the bass at two speaker positions, and a waterfall of how the bass fades"></figure>
           <figcaption>Sweeps mode, in the simulator's living room (5.64 × 5.24 m, like the room CorrectSound was first tried in). Pinned (grey) with the speakers 80 cm from the wall behind them: the reflection off that wall cancels a band around 85 Hz, 23 dB deep. Moved to 30 cm, the dip is gone and the bass is 2.9 dB more even. No equalizer can do that. The waterfall shows how the latest sweep's bass fades: the 32 and 45 Hz standing waves ring longest.</figcaption>
-          <figure class="shot zoom" style="margin-top:22px"><img loading="lazy" src="img/5c-fastest.png" alt="Placement screen in fastest-sweeps mode: the bass from a short looping sweep, against the pinned sweep"></figure>
-          <figcaption>Fastest sweeps, same room, speakers at 30 cm: a third-of-a-second sweep in a loop, the curve updated ten times a second. It reads the bass in 2.9 Hz steps, so in a room whose lowest notes ring this long it lands within about 1.5 dB of a full sweep at the same spot: plenty to tell placements apart, which differ by several dB.</figcaption>
           <figure class="shot zoom" style="margin-top:22px"><img loading="lazy" src="img/5d-fast.png" alt="Placement screen in fast-sweeps mode: the speakers back at 80 cm, and a big number in red saying the bass is less even than at the pinned 30 cm"></figure>
           <figcaption>Fast sweeps, with 30 cm pinned and the speakers moved back out to 80 cm: the 85 Hz dip returns and the big number turns red.</figcaption>
         </div>
@@ -869,7 +867,7 @@ without sound.</pre></div></details>
       <details class="prompt"><summary>CamillaDSP or PipeWire's filter chain instead of EasyEffects</summary><div class="body"><pre class="copyable">I don't use EasyEffects. Add an output for &lt;CamillaDSP / a PipeWire filter-chain module&gt;:
 generate its configuration from the EqSet (src/eq), install and load it the way
 src/platform/linux/easyeffects.rs does for EasyEffects (back up, apply, autoload, restore), and let
-the user pick the output in step 1 when both are available. Verification (the `v` key) must
+the user pick the output in setup when both are available. Verification (the `v` key) must
 measure through the new path.</pre></div></details>
       <details class="prompt"><summary>A headless box (Raspberry Pi, streamer)</summary><div class="body"><pre class="copyable">My speakers are driven by a Raspberry Pi without a display. Add a non-interactive mode:
 `correctsound auto --sink NAME` that runs the measurement steps with prompts on stdout and
@@ -946,11 +944,12 @@ correctsound --window        # in a window of its own, drawn on the GPU</pre>
     <table style="margin-top:26px">
       <tr><th>Key</th><th>Where</th><th>Does</th></tr>
       <tr><td><kbd>Enter</kbd></td><td>everywhere</td><td>the screen's main action</td></tr>
-      <tr><td><kbd>a</kbd></td><td>measure / save</td><td>add a mic position / apply in EasyEffects</td></tr>
+      <tr><td><kbd>a</kbd></td><td>measure / save</td><td>add a mic position / install in EasyEffects</td></tr>
       <tr><td><kbd>p</kbd></td><td>measure</td><td>live placement and room treatment</td></tr>
-      <tr><td><kbd>m</kbd></td><td>placement</td><td>mode: sweeps, fast sweeps or fastest sweeps</td></tr>
+      <tr><td><kbd>m</kbd></td><td>placement</td><td>mode: sweeps or fast sweeps</td></tr>
+      <tr><td><kbd>Tab</kbd></td><td>measure / result / save</td><td>the charts: both channels, the left only, the right only (in placement, the decay and the room screen: the other speaker)</td></tr>
       <tr><td><kbd>t</kbd> <kbd>h</kbd> <kbd>f</kbd> <kbd>d</kbd></td><td>result</td><td>tilt, high limit, filter count, back to automatic</td></tr>
-      <tr><td><kbd>v</kbd></td><td>save</td><td>verify through EasyEffects</td></tr>
+      <tr><td><kbd>v</kbd> <kbd>u</kbd></td><td>save</td><td>verify through EasyEffects / roll EasyEffects back to how it was</td></tr>
       <tr><td><kbd>c</kbd> <kbd>w</kbd> <kbd>r</kbd> <kbd>i</kbd></td><td>after measuring</td><td>curiosities, decay waterfall, the room from above, how it works</td></tr>
       <tr><td><kbd>↑</kbd><kbd>↓</kbd> <kbd>←</kbd><kbd>→</kbd> <kbd>[</kbd><kbd>]</kbd> <kbd>v</kbd> <kbd>g</kbd></td><td>room screen</td><td>choose a number, change it by 5 cm (or type metres and Enter), the standing wave shown, where to sit (the bass at every spot), next room on the list (<kbd>G</kbd> previous; <kbd>m</kbd> mirrors the setup to the other side wall; <kbd>x</kbd> twice deletes one of yours)</td></tr>
     </table>

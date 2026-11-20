@@ -152,6 +152,13 @@ impl AmbientMeter {
         (self.blocks.len() as f64 * HOP as f64 + self.pending.len() as f64) / f64::from(SAMPLE_RATE)
     }
 
+    /// The level per octave right now (the latest half second), dBFS: what moves while the
+    /// steady level holds still.
+    #[must_use]
+    pub fn latest_dbfs(&self) -> Option<OctaveLevels> {
+        self.blocks.back().map(|b| b.map(super::power_to_db))
+    }
+
     /// The steady level per octave over the last 3 s, dBFS: the median of the blocks, so
     /// that short sounds do not count.
     #[must_use]

@@ -1,4 +1,4 @@
-//! Step 7: writing the EQ files, applying them in the EQ host, and verifying through it.
+//! Step 5: writing the EQ files, applying them in the EQ host, and verifying through it.
 
 use std::path::PathBuf;
 
@@ -107,7 +107,15 @@ impl App {
             return;
         }
         match code {
+            KeyCode::Tab => self.show_next_channels(),
             KeyCode::Char('a') if self.can_apply() && self.save.applied.is_none() => self.apply(),
+            KeyCode::Char('u') if self.save.applied.is_some() => self.roll_back(),
+            KeyCode::Char('u') => {
+                self.message = Some(format!(
+                    "Nothing to roll back: {} is as it was.",
+                    self.eq_host_name()
+                ));
+            }
             KeyCode::Char('v') if self.reviewing() => {
                 self.message = Some(
                     "Verifying plays sweeps and records them; start a new run (correctsound) \
@@ -153,8 +161,30 @@ impl App {
             }
         };
         match self.system.apply_eq(&eq, &parent, &sink) {
-            Ok(applied) => self.save.applied = Some(applied),
+            Ok(applied) => {
+                self.save.applied = Some(applied);
+                self.save.rolled_back = None;
+                self.save.error = None;
+            }
             Err(e) => self.save.error = Some(format!("{e:#}")),
+        }
+    }
+
+    /// Puts the EQ host back as it was before the EQ was installed. The verification, made
+    /// with the EQ in place, goes with it.
+    pub(super) fn roll_back(&mut self) {
+        let Some(applied) = &self.save.applied else {
+            return;
+        };
+        match self.system.undo_eq(applied) {
+            Ok(done) => {
+                self.save.rolled_back = Some(done);
+                self.save.applied = None;
+                self.save.verify = None;
+                self.measure.verify = [None, None];
+                self.save.error = None;
+            }
+            Err(e) => self.save.error = Some(format!("Could not roll back: {e:#}")),
         }
     }
 

@@ -1,21 +1,19 @@
 //! Renders the wizard with ratatui.
 
 pub mod bignum;
-mod calibration;
 pub mod cells;
 mod decay;
-mod devices;
 pub mod graphics;
 pub mod info;
 mod level;
 mod measure;
-mod mic_gain;
 mod placement;
 pub mod plot;
 pub mod raster;
 mod result;
 pub mod room;
 mod save;
+mod setup;
 pub mod theme;
 #[cfg(feature = "window")]
 pub mod window;
@@ -48,9 +46,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &App, gfx: &mut Graphics) {
         return;
     }
     match app.step {
-        Step::Preflight => devices::preflight(frame, body, app),
-        Step::Calibration => calibration::calibration(frame, body, app),
-        Step::MicGain => mic_gain::mic_gain(frame, body, app),
+        Step::Setup => setup::setup(frame, body, app),
         Step::Level => level::level(frame, body, app),
         Step::Measure => measure::measure(frame, body, app, gfx),
         Step::Result => result::result(frame, body, app, gfx),
@@ -203,7 +199,7 @@ fn hints(app: &App) -> String {
         return if app.simulated() {
             "Space pin / unpin   m mode   Tab speaker   s pause   ←/→ move the simulated speakers   Esc done"
         } else {
-            "Space pin / unpin   m mode (sweeps, fast, live)   Tab speaker   s pause   Esc done"
+            "Space pin / unpin   m mode (sweeps, fast)   Tab speaker   s pause   Esc done"
         }
         .to_owned();
     }
@@ -223,11 +219,10 @@ fn hints(app: &App) -> String {
 
 fn step_hints(app: &App) -> &'static str {
     match app.step {
-        Step::Preflight => "↑/↓ choose output   r refresh   Enter continue   q quit",
-        Step::Calibration => {
-            "type the serial   Tab mic orientation   Enter download / continue   Esc back"
+        Step::Setup if app.calibration_by_serial() => {
+            "↑/↓ output   0–9 mic serial   Tab mic orientation   r refresh   Enter continue   q quit"
         }
-        Step::MicGain => "Enter set to unity / continue   Esc back   q quit",
+        Step::Setup => "↑/↓ output   r refresh   Enter continue   q quit",
         Step::Level if app.level.phase == LevelPhase::Listening => {
             "Enter play the noise at the suggested level   Esc back"
         }
@@ -237,20 +232,23 @@ fn step_hints(app: &App) -> &'static str {
         Step::Measure if app.measure.running() => "s stop",
         Step::Measure => {
             if app.measure.positions.iter().all(|p| !p.is_empty()) {
-                "Enter continue   a add mic position   x clear   p placement   Esc back"
+                "Enter continue   a add mic position   x clear   Tab channels   p placement   Esc back"
             } else {
                 "Enter measure   p placement   Esc back   q quit"
             }
         }
         Step::Result if app.reviewing() => {
-            "Tab channel   t/T tilt   h high limit   f/F filters   d defaults   Enter save   q quit"
+            "Tab channels   t/T tilt   h high limit   f/F filters   d defaults   Enter save   q quit"
         }
         Step::Result => {
-            "Tab channel   t/T tilt   h high limit   f/F filters   d defaults   Enter save   Esc back"
+            "Tab channels   t/T tilt   h high limit   f/F filters   d defaults   Enter save   Esc back"
         }
         Step::Save if app.measure.running() => "s stop",
-        Step::Save if app.save.applied.is_some() => "v verify   Enter/q quit   Esc back",
-        Step::Save => "a apply the EQ   Enter/q quit   Esc back",
+        Step::Save if app.save.applied.is_some() => {
+            "v verify   u roll back   Tab channels   Enter/q keep it and quit   Esc back"
+        }
+        Step::Save if app.can_apply() => "a install   Tab channels   Enter/q quit   Esc back",
+        Step::Save => "Tab channels   Enter/q quit   Esc back",
     }
 }
 

@@ -1,22 +1,19 @@
 //! Periodic signals, for measurements that update several times a second.
 //!
-//! The signal (pink noise, or a sweep) is played in a seamless loop. Every frequency in it
-//! is a whole multiple of the loop rate, so once the room has settled, any one period of
-//! the recording holds the room's response at exactly those frequencies:
-//! `Y(k) = H(k)·X(k)`. Where the period starts only changes the phase (a circular shift of
-//! the impulse response), so no alignment between playback and recording is needed, and
-//! comparing powers (not phases) makes the small clock difference between a USB mic and the
-//! sound card harmless.
+//! The signal (a sweep) is played in a seamless loop. Every frequency in it is a whole
+//! multiple of the loop rate, so once the room has settled, any one period of the recording
+//! holds the room's response at exactly those frequencies: `Y(k) = H(k)·X(k)`. Where the
+//! period starts only shifts the impulse response circularly, so no alignment between
+//! playback and recording is needed.
 //!
 //! The price of a short period is coarser frequency resolution (the bin width is the loop
 //! rate) and a limit on how long the room may ring before its tail wraps around into the
-//! next period: 0.34 s noise gives 2.9 Hz bins, enough for placement at 1/12 octave; a 1 s
-//! sweep gives 1 Hz bins and room for the waterfall.
+//! next period: a 1 s sweep gives 1 Hz bins and room for the waterfall.
 
 use realfft::RealFftPlanner;
 use realfft::num_complex::Complex;
 
-use super::{Rng, db_to_amplitude};
+use super::db_to_amplitude;
 
 /// A signal that repeats every `len` samples, with known spectrum.
 #[derive(Debug, Clone)]
@@ -60,30 +57,6 @@ impl Periodic {
             band,
             rate,
         }
-    }
-
-    /// Pink noise between `band.0` and `band.1` Hz, repeating every `len` samples, scaled
-    /// so its highest sample is at `peak_dbfs`.
-    #[must_use]
-    pub fn pink_noise(len: usize, band: (f64, f64), peak_dbfs: f64, rate: f64) -> Self {
-        let mut planner = RealFftPlanner::<f64>::new();
-        let ifft = planner.plan_fft_inverse(len);
-        let mut spectrum = ifft.make_input_vec();
-        let bin_hz = rate / len as f64;
-        let last = spectrum.len() - 1;
-        // A fixed seed: the same noise every time, so nothing about it varies by chance.
-        let mut rng = Rng::new(0x5EED_0FA1);
-        for (k, s) in spectrum.iter_mut().enumerate() {
-            let f = k as f64 * bin_hz;
-            if k > 0 && k < last && (band.0..=band.1).contains(&f) {
-                // Pink: power falls 3 dB per octave.
-                *s = Complex::from_polar(1.0 / f.sqrt(), std::f64::consts::TAU * rng.next_f64());
-            }
-        }
-        let mut samples = ifft.make_output_vec();
-        ifft.process(&mut spectrum, &mut samples)
-            .expect("buffer sizes match the plan");
-        Self::from_samples(to_level(&samples, peak_dbfs), band, rate)
     }
 
     /// A logarithmic sweep from `band.0` to `band.1` Hz filling the whole period, so it
@@ -142,26 +115,6 @@ impl Periodic {
             * EMPTY_BIN
     }
 
-    /// The response's power `|H|²` per bin from exactly one period of recording made once
-    /// the room has settled; zero outside the signal's band.
-    ///
-    /// # Panics
-    ///
-    /// If `period` is not one period long.
-    #[must_use]
-    pub fn response_power(&self, period: &[f32]) -> Vec<f64> {
-        assert_eq!(period.len(), self.len(), "one period of recording");
-        let y = spectrum(period.iter().map(|&v| f64::from(v)), self.len());
-        let floor = self.floor();
-        y.iter()
-            .zip(&self.spectrum)
-            .map(|(y, x)| {
-                let x = x.norm_sqr();
-                if x > floor { y.norm_sqr() / x } else { 0.0 }
-            })
-            .collect()
-    }
-
     /// The room's impulse response from one period of recording, circular: it is one
     /// period long, starts wherever the period happened to start, and the direct sound is
     /// its largest sample. Outside the signal's band it fades to nothing over a third of an
@@ -199,31 +152,6 @@ impl Periodic {
         ir.iter_mut().for_each(|v| *v *= scale);
         ir
     }
-
-    /// How far the recording's level inside the signal's band stands above its level in a
-    /// band well above it (1–3 kHz), per bin, dB: low when the signal does not reach the mic.
-    ///
-    /// # Panics
-    ///
-    /// If `period` is not one period long.
-    #[must_use]
-    pub fn reaches_mic_db(&self, period: &[f32]) -> f64 {
-        assert_eq!(period.len(), self.len(), "one period of recording");
-        let y: Vec<f64> = spectrum(period.iter().map(|&v| f64::from(v)), self.len())
-            .iter()
-            .map(Complex::norm_sqr)
-            .collect();
-        let bin_hz = self.bin_hz();
-        let mean = |lo: f64, hi: f64| {
-            let (a, b) = (
-                (lo / bin_hz) as usize,
-                ((hi / bin_hz) as usize).min(y.len()),
-            );
-            y[a..b].iter().sum::<f64>() / (b - a).max(1) as f64
-        };
-        let inside = mean(self.band.0.max(40.0), self.band.1.min(400.0));
-        super::power_to_db(inside / mean(1000.0, 3000.0).max(1e-30))
-    }
 }
 
 #[cfg(test)]
@@ -232,7 +160,6 @@ mod tests {
     use crate::dsp::biquad::{Biquad, BiquadState};
 
     const RATE: f64 = 48_000.0;
-    const LEN: usize = 1 << 14;
 
     /// Plays the signal through `filter` for `periods` and returns the last period.
     fn through(signal: &Periodic, filter: &Biquad, periods: usize, shift: usize) -> Vec<f32> {
@@ -247,29 +174,23 @@ mod tests {
 
     #[test]
     fn recovers_a_resonance_wherever_the_period_starts() {
-        let sweep_len = 3 << 14;
-        for signal in [
-            Periodic::pink_noise(LEN, (15.0, 600.0), -12.0, RATE),
-            Periodic::sweep(sweep_len, (10.0, 1000.0), -12.0, RATE),
-        ] {
-            let peak = signal
-                .samples_f32()
-                .iter()
-                .fold(0.0f32, |m, v| m.max(v.abs()));
-            assert!((f64::from(peak) - db_to_amplitude(-12.0)).abs() < 1e-3);
-            // A +10 dB resonance at 60 Hz, Q 8: a room mode.
-            let mode = Biquad::peaking(RATE, 60.0, 10.0, 8.0);
-            let bin_hz = signal.bin_hz();
-            for shift in [0, 1234, 9000] {
-                let power = signal.response_power(&through(&signal, &mode, 6, shift));
-                for f in [30.0, 60.0, 100.0, 300.0] {
-                    let k = (f / bin_hz).round() as usize;
-                    let expected = mode.magnitude_db(RATE, k as f64 * bin_hz);
-                    let got = crate::dsp::power_to_db(power[k]);
-                    assert!((got - expected).abs() < 0.05, "{f} Hz: {got} vs {expected}");
-                }
-                // Outside the band there is no response.
-                assert_eq!(power[(2000.0 / bin_hz) as usize], 0.0);
+        let signal = Periodic::sweep(3 << 14, (10.0, 1000.0), -12.0, RATE);
+        let peak = signal
+            .samples_f32()
+            .iter()
+            .fold(0.0f32, |m, v| m.max(v.abs()));
+        assert!((f64::from(peak) - db_to_amplitude(-12.0)).abs() < 1e-3);
+        // A +10 dB resonance at 60 Hz, Q 8: a room mode.
+        let mode = Biquad::peaking(RATE, 60.0, 10.0, 8.0);
+        let bin_hz = signal.bin_hz();
+        for shift in [0, 1234, 9000] {
+            let ir = signal.impulse_response(&through(&signal, &mode, 6, shift));
+            let h = spectrum(ir.into_iter(), signal.len());
+            for f in [30.0, 60.0, 100.0, 300.0] {
+                let k = (f / bin_hz).round() as usize;
+                let expected = mode.magnitude_db(RATE, k as f64 * bin_hz);
+                let got = crate::dsp::power_to_db(h[k].norm_sqr());
+                assert!((got - expected).abs() < 0.05, "{f} Hz: {got} vs {expected}");
             }
         }
     }
@@ -302,22 +223,5 @@ mod tests {
                 .fold(0.0f64, |m, (_, v)| m.max(v.abs()));
             assert!(elsewhere < peak * 1e-2, "{elsewhere} vs {peak}");
         }
-    }
-
-    #[test]
-    fn tells_whether_the_noise_reaches_the_mic() {
-        let noise = Periodic::pink_noise(LEN, (15.0, 600.0), -12.0, RATE);
-        let mut rng = Rng::new(7);
-        let hiss: Vec<f32> = (0..LEN)
-            .map(|_| (1e-4 * rng.next_gaussian()) as f32)
-            .collect();
-        let heard: Vec<f32> = noise
-            .samples_f32()
-            .iter()
-            .zip(&hiss)
-            .map(|(s, h)| s * 0.1 + h)
-            .collect();
-        assert!(noise.reaches_mic_db(&heard) > 30.0);
-        assert!(noise.reaches_mic_db(&hiss).abs() < 6.0);
     }
 }

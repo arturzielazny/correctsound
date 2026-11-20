@@ -1,4 +1,4 @@
-//! Step 4's screens: the room's background noise and the level it calls for, then the
+//! Step 2's screens: the room's background noise and the level it calls for, then the
 //! meter for setting the amplifier.
 
 use ratatui::Frame;
@@ -14,7 +14,8 @@ use crate::audio::Channel;
 
 pub(super) fn level(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let l = &app.level;
-    if l.phase == LevelPhase::Listening {
+    // While the EQ host is being bypassed, the listening screen is shown already.
+    if l.phase == LevelPhase::Listening || app.bypassing_eq() {
         listening(frame, area, app);
         return;
     }
@@ -32,7 +33,7 @@ pub(super) fn level(frame: &mut Frame<'_>, area: Rect, app: &App) {
              fine up to {COMFORT_MAX_SPL:.0} dB."
         )),
         Line::from(
-            "Put the mic where your head is when listening, at ear height, pointing as chosen in step 2.",
+            "Put the mic where your head is when listening, at ear height, pointing as chosen in setup.",
         ),
         Line::from("No amplifier knob? Use ↑/↓ to change the output volume instead."),
     ];
@@ -146,14 +147,18 @@ pub(super) fn level(frame: &mut Frame<'_>, area: Rect, app: &App) {
             groups.join(", ")
         )));
     }
-    if let Some(a) = l.ambient_spl {
-        let text = format!("In the meter's band the background is {a:.0} dB SPL");
+    if let (Some(a), Some(raises)) = (l.ambient_spl, l.background_raises_db()) {
+        let below = target - a;
+        let text = format!(
+            "In the meter's band the room's own background is {a:.0} dB SPL, {below:.0} dB \
+             under the level to set"
+        );
         lines.push(Line::from(if l.room_is_noisy() {
             warn(&format!(
-                "{text}, close enough to the noise to raise the reading a little"
+                "{text}: the meter hears it too, so it reads about {raises:.1} dB high"
             ))
         } else {
-            ok(&text)
+            ok(&format!("{text}: too quiet to change the reading"))
         }));
     }
     if let Some(v) = l.sink_volume {
@@ -230,21 +235,26 @@ pub(super) fn group_level(noise: &crate::dsp::ambient::OctaveLevels, g: &NoiseGr
     )
 }
 
-/// What a measurement level means, in words and colour.
+/// Up to this measurement level the room is fine to measure in, dB SPL: comfortable to
+/// listen to and easy for any speaker, so it is shown green.
+const FINE_LEVEL_SPL: f64 = 75.0;
+
+/// What a measurement level means: the noise in words, and in colour whether that is fine to
+/// measure at (green), loud (yellow) or too much (red).
 pub(super) fn level_verdict(needs: f64) -> (&'static str, Color) {
     use crate::dsp::ambient::{MAX_LEVEL_SPL, MIN_LEVEL_SPL};
     if needs <= MIN_LEVEL_SPL {
         ("quiet", Color::Green)
-    } else if needs <= 70.0 {
-        ("some noise", Color::Yellow)
+    } else if needs <= FINE_LEVEL_SPL {
+        ("some noise", Color::Green)
     } else if needs <= MAX_LEVEL_SPL {
-        ("noisy", Color::LightRed)
+        ("noisy", Color::Yellow)
     } else {
-        ("too noisy", Color::Red)
+        ("too noisy", Color::LightRed)
     }
 }
 
-/// Step 4, first part: listening to the room, live, and the level it calls for.
+/// Step 2, first part: listening to the room, live, and the level it calls for.
 pub(super) fn listening(frame: &mut Frame<'_>, area: Rect, app: &App) {
     use crate::dsp::ambient::{MARGIN_GOAL_DB, MAX_LEVEL_SPL, MIN_LEVEL_SPL};
     let l = &app.level;
@@ -266,7 +276,7 @@ pub(super) fn listening(frame: &mut Frame<'_>, area: Rect, app: &App) {
              The suggestion follows the room as long as you listen."
         )),
         Line::from(
-            "Put the mic where your head is when listening, at ear height, pointing as chosen in step 2.",
+            "Put the mic where your head is when listening, at ear height, pointing as chosen in setup.",
         ),
     ];
     frame.render_widget(
@@ -279,8 +289,10 @@ pub(super) fn listening(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let mut rows = Vec::new();
     match (&l.room_noise, &l.suggestion) {
         (Some(n), Some(s)) => {
-            // Bars from 0 to 70 dB SPL.
+            // Bars from 0 to 70 dB SPL: the steady level, and a tick where the sound is right
+            // now, which moves with the room while the bar holds still.
             let bar_width = 24usize;
+            let cells = |db: f64| ((db / 70.0).clamp(0.0, 1.0) * bar_width as f64).round() as usize;
             for g in &NOISE_GROUPS {
                 let level = group_level(n, g);
                 let needs = s.needs[g.octaves.clone()]
@@ -289,32 +301,52 @@ pub(super) fn listening(frame: &mut Frame<'_>, area: Rect, app: &App) {
                     .copied()
                     .fold(f64::NEG_INFINITY, f64::max);
                 let (word, color) = level_verdict(needs);
-                let filled = ((level / 70.0).clamp(0.0, 1.0) * bar_width as f64).round() as usize;
-                rows.push(Line::from(vec![
+                let filled = cells(level);
+                let now = l
+                    .room_noise_now
+                    .as_ref()
+                    .map(|n| cells(group_level(n, g)).min(bar_width - 1));
+                let mut row = vec![
                     Span::styled(format!("{:<6}", g.name), Style::default().bold()),
                     Span::raw(format!("{:<15}", g.range)),
                     Span::raw(format!("{level:>4.0} dB SPL  ")),
-                    Span::styled("█".repeat(filled), Style::default().fg(color)),
-                    Span::styled(
-                        "░".repeat(bar_width - filled),
-                        Style::default().fg(Color::DarkGray),
-                    ),
-                    Span::styled(format!("  {word:<11}"), Style::default().fg(color)),
-                    Span::styled(g.sources, Style::default().fg(Color::DarkGray)),
-                ]));
+                ];
+                for i in 0..bar_width {
+                    row.push(if Some(i) == now {
+                        Span::styled("┃", Style::default().fg(Color::Reset).bold())
+                    } else if i < filled {
+                        Span::styled("█", Style::default().fg(color))
+                    } else {
+                        Span::styled("░", Style::default().fg(Color::DarkGray))
+                    });
+                }
+                row.push(Span::styled(
+                    format!("  {word:<11}"),
+                    Style::default().fg(color),
+                ));
+                row.push(Span::styled(
+                    g.sources,
+                    Style::default().fg(Color::DarkGray),
+                ));
+                rows.push(Line::from(row));
             }
             rows.push(Line::from(""));
             rows.push(Line::from(Span::styled(
-                "Levels are the steady background over the last 3 seconds; a cough or a car \
-                 passing does not count.",
+                "Bars: the steady background over the last 3 seconds, so a cough or a car \
+                 passing does not count. ┃ the sound right now.",
                 Style::default().fg(Color::DarkGray),
             )));
         }
         _ => rows.push(Line::from(format!("Listening… {:.1} s", l.listened_secs()))),
     }
+    // The time keeps counting, so it is plain that listening goes on.
+    let title = format!(
+        "Background noise · live, {:.0} s",
+        l.listening_secs().floor()
+    );
     frame.render_widget(
         Paragraph::new(rows)
-            .block(panel("Background noise"))
+            .block(panel(&title))
             .wrap(Wrap { trim: false }),
         noise,
     );
@@ -325,11 +357,6 @@ pub(super) fn listening(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let mut lines = Vec::new();
     if let Some(s) = &l.suggestion {
         let color = level_verdict(s.level_spl).1;
-        let color = if color == Color::Red {
-            Color::LightRed
-        } else {
-            color
-        };
         big.extend(bignum::lines(
             &format!("{:.0}", s.level_spl),
             Style::default().fg(color),
@@ -338,7 +365,25 @@ pub(super) fn listening(frame: &mut Frame<'_>, area: Rect, app: &App) {
             "dB SPL",
             Style::default().fg(color),
         )));
-        big.push(Line::from(""));
+        // A change is pointed out for a few seconds, so it does not come as a surprise.
+        big.push(Line::from(match l.recent_change() {
+            Some(was) => Span::styled(
+                format!(
+                    "{} from {was:.0} dB a moment ago: the room got {}",
+                    if s.level_spl > was { "Up" } else { "Down" },
+                    if s.level_spl > was {
+                        "louder"
+                    } else {
+                        "quieter"
+                    }
+                ),
+                Style::default().fg(Color::Yellow),
+            ),
+            None => Span::styled(
+                "follows the room while you listen",
+                Style::default().fg(Color::DarkGray),
+            ),
+        }));
         let octave = if s.limited_by_hz < 1000.0 {
             format!("{:.0} Hz", s.limited_by_hz)
         } else {

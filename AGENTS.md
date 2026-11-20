@@ -31,8 +31,8 @@ src/audio/             AudioBackend trait (play a Source, record the mic), the r
 src/dsp, src/eq        signal processing and EQ design: pure Rust, no I/O
 src/analysis.rs, src/insights.rs, src/cal.rs, src/session.rs
 src/app/               the wizard's state machine: mod.rs holds the App, the steps and the
-                       key dispatch; each step has a file of its own (devices, calibration,
-                       mic_gain, level, measure, result, save; placement and room for those
+                       key dispatch; each step has a file of its own (setup, level, measure,
+                       result, save; placement and room for those
                        screens) with its state, its keys and its background work
 src/ui/                drawing (ratatui; charts as images or braille): mod.rs the frame,
                        header, footer and key hints; a file per screen, named as in src/app/
@@ -65,7 +65,8 @@ The two interfaces a platform implements:
 
 - `platform::System`: list the mic and outputs, read and set the mic's input gain and the
   output volume, find and control the EQ host (the program that applies the EQ to all
-  playback: EasyEffects on Linux), check where playback is going, and install the EQ.
+  playback: EasyEffects on Linux), check where playback is going, install the EQ, and roll
+  the EQ host back to how it was before (`undo_eq`).
 - `audio::AudioBackend`: play a `Source` on one channel of the chosen output at 48 kHz
   while recording the mic, directly (`Route::Hardware`) or through the EQ host
   (`Route::ThroughEq`, for verification).
@@ -161,8 +162,9 @@ Users install ready-made binaries (`docs/install.sh`, the website's one-line ins
 release is what reaches them. **Every push that changes the website (anything in `docs/`,
 which GitHub Pages publishes at once, the web version in `docs/try/` included) is a release**,
 so the page, the web version and the downloads always describe the same app: the minor
-version for new features, the patch version for fixes only. Wait for CI to pass on the
-commit before pushing its tag. To release: raise `version` in Cargo.toml (and web/Cargo.toml), rebuild the web page, add the changes to "What's new"
+version for new features, the patch version for fixes only. The version changes only then,
+in the last commit before the push, never while the work is under way. Wait for CI to pass
+on the commit before pushing its tag. To release: raise `version` in Cargo.toml (and web/Cargo.toml), rebuild the web page, add the changes to "What's new"
 in `docs/index.html`, commit, then tag and push the tag (`git tag v0.3.0 && git push origin
 v0.3.0`). `.github/workflows/release.yml` builds Linux (x86_64, ARM), macOS (Apple silicon,
 Intel) and Windows binaries, with the window, and publishes them as the latest release.

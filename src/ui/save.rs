@@ -1,19 +1,20 @@
-//! Step 7's screen: the files written, applying them, and the verification through the EQ
+//! Step 5's screen: the files written, applying them, and the verification through the EQ
 //! host.
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::text::Line;
+use ratatui::style::{Color, Style};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 
 use super::graphics::Graphics;
 use super::plot::{self};
 use super::result::{both_channels_range, channel_curves};
-use super::{bad, ok, panel, warn};
+use super::{ACCENT, bad, ok, panel, warn};
 use crate::app::{App, VerifyResult};
 
 pub(super) fn save(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Graphics) {
-    let [info, plots] = Layout::vertical([Constraint::Length(12), Constraint::Min(6)]).areas(area);
+    let [info, plots] = Layout::vertical([Constraint::Length(14), Constraint::Min(6)]).areas(area);
     let s = &app.save;
     let mut lines = Vec::new();
     if let Some(e) = &s.error {
@@ -33,43 +34,10 @@ pub(super) fn save(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Graph
     }
     lines.push(Line::from(""));
     let host = app.eq_host_name();
-    match (&s.applied, app.can_apply()) {
-        (Some(a), _) => {
-            lines.push(Line::from(ok(&format!(
-                "Loaded preset \"{}\" in {host}; its previous settings are backed up in {}",
-                a.preset_name,
-                crate::paths::tilde(&a.backup_dir)
-            ))));
-            lines.push(Line::from(match &a.autoload {
-                Some(route) => ok(&format!(
-                    "{host} will load it automatically for {route}, also after a restart"
-                )),
-                None => warn(&format!(
-                    "Could not set it to load automatically: set that in {host}'s settings"
-                )),
-            }));
-            match (&s.verify, app.measure.progress()) {
-                (_, Some((ch, p))) => lines.push(Line::from(format!(
-                    "Verifying {}… {:.0}%",
-                    ch.name().to_lowercase(),
-                    p * 100.0
-                ))),
-                (Some(v), None) => verify_lines(v, host, &mut lines),
-                (None, None) if app.measure.positions[0].len() > 1 => {
-                    lines.push(Line::from(format!(
-                        "Press v to verify: put the mic back where the first measurement was, \
-                         then the sweeps play again, this time through {host}."
-                    )));
-                }
-                (None, None) => lines.push(Line::from(format!(
-                    "Press v to verify: the sweeps play again, this time through {host}. Don't move the mic."
-                ))),
-            }
-        }
-        (None, true) => lines.push(Line::from(format!(
-            "Press a to install the preset in {host} and load it (its current settings are backed up first)."
-        ))),
-        (None, false) => lines.push(Line::from(
+    if app.can_apply() || s.applied.is_some() {
+        steps(app, host, &mut lines);
+    } else {
+        lines.push(Line::from(
             match app.devices.as_ref().and_then(|d| d.eq_host.as_ref()) {
                 Some(h) => format!(
                     "{} is not running: load left.txt / right.txt into its equalizer by hand, one per channel.",
@@ -79,25 +47,113 @@ pub(super) fn save(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Graph
                          equalizer by hand, one per channel."
                     .to_owned(),
             },
-        )),
+        ));
     }
     if let Some(issue) = &app.measure.issue {
         lines.push(Line::from(bad(issue)));
     }
     frame.render_widget(
         Paragraph::new(lines)
-            .block(panel("Save & apply"))
+            .block(panel("Save, try and keep"))
             .wrap(Wrap { trim: true }),
         info,
     );
-    let [l, r] =
-        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(plots);
+    // The channels shown (Tab) side by side, on one scale.
+    let shown = app.shown.channels();
+    let columns = Layout::horizontal(vec![Constraint::Fill(1); shown.len()]).split(plots);
     let range = both_channels_range(app, true);
-    for (c, area) in [(0, l), (1, r)] {
+    for (&c, &area) in shown.iter().zip(columns.iter()) {
         let name = if c == 0 { "Left" } else { "Right" };
         let curves = channel_curves(app, c, true);
         plot::draw_with_range(frame, area, name, &curves, &[], range, gfx);
     }
+}
+
+/// Installing, verifying and rolling back, as three steps: what is done says so, the next
+/// step is lit with its key, the others are dim with theirs.
+fn steps(app: &App, host: &str, lines: &mut Vec<Line<'static>>) {
+    let s = &app.save;
+    lines.push(Line::from(format!(
+        "Try it in {host}, check it, then keep it or roll back to how {host} was:"
+    )));
+    // 1. Install.
+    match &s.applied {
+        Some(a) => {
+            lines.push(Line::from(ok(&format!(
+                "Installed \"{}\" in {host} and loaded it; its earlier settings are backed up in {}",
+                a.preset_name,
+                crate::paths::tilde(&a.backup_dir)
+            ))));
+            lines.push(Line::from(match &a.autoload {
+                Some(route) => Span::raw(format!(
+                    "   {host} loads it automatically for {route}, also after a restart"
+                )),
+                None => warn(&format!(
+                    "Could not set it to load automatically: set that in {host}'s settings"
+                )),
+            }));
+        }
+        None => lines.push(step(
+            "1",
+            "a",
+            &format!("install: load it in {host} (its current settings are backed up first)"),
+            true,
+        )),
+    }
+    // 2. Verify.
+    let installed = s.applied.is_some();
+    match (&s.verify, app.measure.progress()) {
+        (_, Some((ch, p))) => lines.push(Line::from(format!(
+            "   Verifying {}… {:.0}%",
+            ch.name().to_lowercase(),
+            p * 100.0
+        ))),
+        (Some(v), None) if installed => verify_lines(v, host, lines),
+        _ => {
+            let where_mic = if app.measure.positions[0].len() > 1 {
+                "put the mic back where the first measurement was; "
+            } else {
+                "keep the mic where it is; "
+            };
+            lines.push(step(
+                "2",
+                "v",
+                &format!(
+                    "verify: {where_mic}the sweeps play again through {host} and are compared \
+                     with the prediction"
+                ),
+                installed,
+            ));
+        }
+    }
+    // 3. Keep it or roll back.
+    match (&s.applied, &s.rolled_back) {
+        (None, Some(done)) => {
+            lines.push(Line::from(ok(&format!("Rolled back. {done}"))));
+            lines.push(Line::from("   a installs it again."));
+        }
+        _ => lines.push(step(
+            "3",
+            "u",
+            &format!("roll back: {host} goes back to how it was. Or Enter keeps it and quits."),
+            installed && !app.measure.running(),
+        )),
+    }
+}
+
+/// One step: its number, its key and what it does; lit when it is the one to do now.
+fn step(number: &str, key: &str, text: &str, now: bool) -> Line<'static> {
+    let (key_style, text_style) = if now {
+        (Style::default().fg(ACCENT).bold(), Style::default())
+    } else {
+        let dim = Style::default().fg(Color::DarkGray);
+        (dim, dim)
+    };
+    Line::from(vec![
+        Span::styled(format!("{number}  "), text_style),
+        Span::styled(format!("{key} "), key_style),
+        Span::styled(text.to_owned(), text_style),
+    ])
 }
 
 /// Verification summary: overall match, then any single spot that differs a lot.

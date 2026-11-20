@@ -481,7 +481,7 @@ pub fn insights(inp: &Inputs<'_>) -> Vec<Section> {
     }
     if let Some(a) = inp.ambient_spl {
         room.push(format!(
-            "Background noise: {a:.0} dB SPL in the 500–2000 Hz band ({}).",
+            "Background noise: {a:.0} dB SPL in the level meter's band, 250 Hz–4 kHz ({}).",
             if a < 30.0 {
                 "very quiet"
             } else if a < 40.0 {
