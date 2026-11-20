@@ -162,7 +162,7 @@ impl Room {
     /// Every mode up to `top_hz`, lowest first.
     #[must_use]
     pub fn modes(&self, top_hz: f64) -> Vec<RoomMode> {
-        let most = |len: f64| (2.0 * len * top_hz / SPEED_OF_SOUND) as u8 + 1;
+        let most = |len: f64| ((2.0 * len * top_hz / SPEED_OF_SOUND).clamp(0.0, 254.0)) as u8 + 1;
         let mut out = Vec::new();
         for l in 0..=most(self.length) {
             for m in 0..=most(self.width) {
@@ -312,6 +312,8 @@ impl Model {
     #[must_use]
     pub fn seat_map(&self, setup: &Setup, step: f64) -> SeatMap {
         let r = self.room;
+        // Keep huge rooms responsive without altering resolution for typical rooms (<= 6 m).
+        let step = step.max(r.length.max(r.width) / 60.0);
         let nx = ((r.length / step).floor() as usize).max(1);
         let ny = ((r.width / step).floor() as usize).max(1);
         let freqs = grid(FROM_HZ, JUDGED_TO_HZ);
@@ -458,8 +460,10 @@ impl<'a> Evaluator<'a> {
         for dx in offsets {
             for dy in offsets {
                 let r = Point {
-                    x: (receiver.x + dx * spread).clamp(WALL_GAP, room.length - WALL_GAP),
-                    y: (receiver.y + dy * spread).clamp(WALL_GAP, room.width - WALL_GAP),
+                    x: (receiver.x + dx * spread)
+                        .clamp(WALL_GAP, (room.length - WALL_GAP).max(WALL_GAP)),
+                    y: (receiver.y + dy * spread)
+                        .clamp(WALL_GAP, (room.width - WALL_GAP).max(WALL_GAP)),
                     z: receiver.z,
                 };
                 for (p, h) in power.iter_mut().zip(self.response(sources, r)) {
@@ -1169,5 +1173,26 @@ mod tests {
             .expect("cells");
         assert!(best <= here);
         assert!(map.values.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn huge_room_guards_mode_order_and_seat_map_grid_size() {
+        // Length axis would exceed u8::MAX without clamping; other axes stay small so the test is fast.
+        let corridor = Room {
+            length: 30.0,
+            width: 1.5,
+            height: 1.8,
+        };
+        assert!(!corridor.modes(1500.0).is_empty());
+
+        let hall = Room {
+            length: 30.0,
+            width: 24.0,
+            height: 4.0,
+        };
+        let setup = Setup::typical(hall);
+        let model = Model::new(hall, &[], 0.8);
+        let map = model.seat_map(&setup, 0.1);
+        assert!(map.nx <= 60 && map.ny <= 60, "{}x{}", map.nx, map.ny);
     }
 }

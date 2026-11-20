@@ -463,7 +463,7 @@ impl App {
                     return;
                 };
                 let current = self.system.output_volume(&sink).unwrap_or(1.0);
-                let new = (current + step).clamp(0.0, 1.0);
+                let new = (current + step).clamp(0.0, current.max(1.0));
                 match self.system.set_output_volume(&sink, new) {
                     Ok(()) => self.level.sink_volume = Some(new),
                     Err(e) => self.set_error(&e),
