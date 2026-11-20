@@ -121,7 +121,9 @@ fn run(page: Rc<RefCell<Page>>) -> Result<(), JsValue> {
         }
         let Ok(window) = window() else { return };
         // After this frame is shown, so a key's answer is not held up by the work.
-        let _ = window.set_timeout_with_callback(work.as_ref().unchecked_ref());
+        if correctsound::background::has_work() {
+            let _ = window.set_timeout_with_callback(work.as_ref().unchecked_ref());
+        }
         if let Some(f) = again.borrow().as_ref() {
             let _ = window.request_animation_frame(f.as_ref().unchecked_ref());
         }

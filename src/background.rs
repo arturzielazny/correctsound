@@ -46,6 +46,13 @@ pub fn work() {
     imp::work();
 }
 
+/// True when there is queued work or an active paced stream waiting for [`work`] (always
+/// `false` where threads run background work on their own).
+#[must_use]
+pub fn has_work() -> bool {
+    imp::has_work()
+}
+
 #[cfg(not(target_family = "wasm"))]
 mod imp {
     use std::num::NonZeroUsize;
@@ -170,6 +177,10 @@ mod imp {
 
     pub fn work() {}
 
+    pub fn has_work() -> bool {
+        false
+    }
+
     #[cfg(test)]
     pub(super) fn active_workers() -> usize {
         SPAWNED_WORKERS.load(Ordering::Acquire)
@@ -233,6 +244,10 @@ mod imp {
     pub fn work() {
         run_streams();
         run_jobs();
+    }
+
+    pub fn has_work() -> bool {
+        JOBS.with(|j| !j.borrow().is_empty()) || STREAMS.with(|s| !s.borrow().is_empty())
     }
 
     fn run_jobs() {
