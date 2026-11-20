@@ -19,8 +19,8 @@
 //!
 //! The energy decay is what is reported; the width is the cross-check.
 
-use realfft::RealFftPlanner;
 use realfft::num_complex::Complex;
+use realfft::{RealFftPlanner, RealToComplex};
 
 use super::biquad::Biquad;
 
@@ -185,13 +185,14 @@ pub fn analyse(ir: &[f64], peak: usize, rate: f64) -> (Vec<Mode>, Option<BassSpe
         return (Vec::new(), None);
     }
     // High-resolution spectrum, the end tapered over half a second.
+    let fft = RealFftPlanner::<f64>::new().plan_fft_forward(FFT_LEN);
     let lead = 0.05;
     let x = stretch(ir, peak, -lead, SPAN_S, rate);
     let taper = 0.5 * rate;
     let weights: Vec<f64> = (0..x.len())
         .map(|i| ((x.len() - i) as f64 / taper).min(1.0))
         .collect();
-    let complex = spectrum(x.iter().zip(&weights).map(|(v, w)| v * w));
+    let complex = spectrum(fft.as_ref(), x.iter().zip(&weights).map(|(v, w)| v * w));
     let db: Vec<f64> = complex
         .iter()
         .map(|c| super::power_to_db(c.norm_sqr()))
@@ -219,7 +220,7 @@ pub fn analyse(ir: &[f64], peak: usize, rate: f64) -> (Vec<Mode>, Option<BassSpe
     // same window energy, and averaged over ±1 Hz so it is a floor and not noise itself.
     let late = stretch(ir, peak, SPAN_S, SPAN_S + NOISE_S, rate);
     let scale = weights.iter().map(|w| w * w).sum::<f64>() / late.len() as f64;
-    let noise_bins = spectrum_db(late.into_iter());
+    let noise_bins = spectrum_db(fft.as_ref(), late.into_iter());
     let bin = rate / FFT_LEN as f64;
     let half = (1.0 / bin) as usize;
     let floor = |k: usize| {
@@ -280,12 +281,11 @@ pub fn analyse(ir: &[f64], peak: usize, rate: f64) -> (Vec<Mode>, Option<BassSpe
 }
 
 /// Spectrum of `samples`, zero-padded to [`FFT_LEN`].
-fn spectrum(samples: impl Iterator<Item = f64>) -> Vec<Complex<f64>> {
+fn spectrum(fft: &dyn RealToComplex<f64>, samples: impl Iterator<Item = f64>) -> Vec<Complex<f64>> {
     let mut buf = vec![0.0; FFT_LEN];
     for (b, v) in buf.iter_mut().zip(samples) {
         *b = v;
     }
-    let fft = RealFftPlanner::<f64>::new().plan_fft_forward(FFT_LEN);
     let mut out = fft.make_output_vec();
     fft.process(&mut buf, &mut out)
         .expect("buffer sizes match the plan");
@@ -293,8 +293,8 @@ fn spectrum(samples: impl Iterator<Item = f64>) -> Vec<Complex<f64>> {
 }
 
 /// Power spectrum of `samples`, zero-padded to [`FFT_LEN`], dB.
-fn spectrum_db(samples: impl Iterator<Item = f64>) -> Vec<f64> {
-    spectrum(samples)
+fn spectrum_db(fft: &dyn RealToComplex<f64>, samples: impl Iterator<Item = f64>) -> Vec<f64> {
+    spectrum(fft, samples)
         .iter()
         .map(|c| super::power_to_db(c.norm_sqr()))
         .collect()
