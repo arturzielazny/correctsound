@@ -74,7 +74,7 @@ fn pw_cat(mode: &str, target: &str, channels: u32, node: &str) -> Command {
 type Shared = Arc<Mutex<Vec<Child>>>;
 type ErrorSlot = Arc<Mutex<Option<String>>>;
 
-const MAX_STDERR_BYTES: u64 = 4096;
+const MAX_STDERR_BYTES: usize = 4096;
 
 fn record_error(slot: &ErrorSlot, msg: String) {
     let mut guard = slot
@@ -85,13 +85,28 @@ fn record_error(slot: &ErrorSlot, msg: String) {
     }
 }
 
-fn spawn_stderr_reader(stderr: Option<std::process::ChildStderr>) -> thread::JoinHandle<String> {
-    thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(s) = stderr {
-            let _ = s.take(MAX_STDERR_BYTES).read_to_end(&mut buf);
+/// Drains `reader` until EOF so the child never hits SIGPIPE, keeping at most `limit` bytes.
+fn drain_capped(mut reader: impl Read, limit: usize) -> String {
+    let mut kept = Vec::new();
+    let mut chunk = [0u8; 1024];
+    loop {
+        match reader.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                let space = limit.saturating_sub(kept.len());
+                if space > 0 {
+                    kept.extend_from_slice(&chunk[..n.min(space)]);
+                }
+            }
         }
-        String::from_utf8_lossy(&buf).trim().to_owned()
+    }
+    String::from_utf8_lossy(&kept).trim().to_owned()
+}
+
+fn spawn_stderr_reader(stderr: Option<std::process::ChildStderr>) -> thread::JoinHandle<String> {
+    thread::spawn(move || match stderr {
+        Some(s) => drain_capped(s, MAX_STDERR_BYTES),
+        None => String::new(),
     })
 }
 
@@ -301,5 +316,31 @@ impl AudioBackend for PwCat {
             }),
         )
         .with_error(error))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stderr_reader_drains_past_cap_without_breaking_pipe() {
+        // Larger than both MAX_STDERR_BYTES (4 KiB) and Linux's 64 KiB pipe buffer: if the
+        // reader closed the pipe early, the writer would be killed by SIGPIPE.
+        let mut child = Command::new("sh")
+            .args([
+                "-c",
+                "dd if=/dev/zero bs=1024 count=128 2>/dev/null | tr '\\0' 'e' >&2",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn child");
+        let reader = spawn_stderr_reader(child.stderr.take());
+        let status = child.wait().expect("wait child");
+        assert!(status.success(), "child died (likely SIGPIPE): {status}");
+        let msg = reader.join().expect("reader thread");
+        assert_eq!(msg.len(), MAX_STDERR_BYTES);
     }
 }
