@@ -356,7 +356,9 @@ fn render(
         let x = x_at(f);
         c.line((x, y0), (x, y1), Pen::solid(t.muted, 0.45, 1.0));
         let w = Canvas::text_width(font, label, px);
-        let lx = (x - w / 2.0).clamp(x0 - w / 2.0, c.w - w - 2.0);
+        let min_lx = x0 - w / 2.0;
+        let max_lx = (c.w - w - 2.0).max(min_lx);
+        let lx = (x - w / 2.0).clamp(min_lx, max_lx);
         c.text(font, label, (lx, y1 + px * 0.3), px, t.foreground, 0.75);
     }
     let (minor, major_step) = grid_steps(lo, hi);
@@ -374,7 +376,7 @@ fn render(
                 &label,
                 (
                     left - w - px * 0.4,
-                    (y - px * 0.6).clamp(0.0, c.h - px * 1.3),
+                    (y - px * 0.6).clamp(0.0, (c.h - px * 1.3).max(0.0)),
                 ),
                 px,
                 t.foreground,
@@ -452,7 +454,7 @@ fn draw_braille(
             for c in curves {
                 for w in c.points.windows(2) {
                     let (a, b) = (w[0], w[1]);
-                    if a.0 < low_hz || b.0 > high_hz {
+                    if a.0 < low_hz || b.0 > high_hz || !a.1.is_finite() || !b.1.is_finite() {
                         continue;
                     }
                     ctx.draw(&Line::new(
@@ -467,7 +469,9 @@ fn draw_braille(
             }
             for &(f, label) in &major_ticks {
                 let len = label.len() as f64;
-                let x = (f.log10() - cell * len / 2.0).clamp(x0 + cell * 3.0, x1 - cell * len);
+                let min_x = x0 + cell * 3.0;
+                let max_x = (x1 - cell * len).max(min_x);
+                let x = (f.log10() - cell * len / 2.0).clamp(min_x, max_x);
                 ctx.print(x, lo, Span::styled(label, Style::default().fg(Color::Gray)));
             }
             // dB labels on the left edge, skipping the bottom row used by the Hz labels.
@@ -813,5 +817,35 @@ mod tests {
             255,
         ]);
         assert!(img.pixels().filter(|p| **p != bg).count() > 1000);
+    }
+
+    #[test]
+    fn tiny_plots_do_not_panic() {
+        let theme = Theme::parse("");
+        let curves = [Curve::new(
+            "measured",
+            Series::Measured,
+            &[20.0, 100.0, 1000.0],
+            &[70.0, f64::NAN, 75.0],
+        )];
+        let mut canvas = Canvas::new(12, 8, theme.background, 10.0);
+        render(&mut canvas, &theme, None, &curves, &[], FULL, (50.0, 90.0));
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(6, 4)).expect("backend");
+        let mut gfx = Graphics::text_only();
+        terminal
+            .draw(|f| {
+                draw_axes(
+                    f,
+                    f.area(),
+                    "tiny",
+                    &curves,
+                    &[],
+                    FULL,
+                    (50.0, 90.0),
+                    &mut gfx,
+                )
+            })
+            .expect("draw tiny braille plot");
     }
 }

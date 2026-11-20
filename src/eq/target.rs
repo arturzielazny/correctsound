@@ -132,8 +132,8 @@ impl Target {
             t.low_hz = r.max(GRID_LOW_HZ);
         }
         t.high_hz = match options.high_limit_hz {
-            Some(h) => h.min(GRID_HIGH_HZ),
-            None => treble_limit(fit, &t),
+            Some(h) if h.is_finite() => h.clamp(CUT_FLOOR_HZ, GRID_HIGH_HZ),
+            _ => treble_limit(fit, &t),
         };
         if t.low_hz > CUT_FLOOR_HZ {
             let smooth = octave_average_db(fit, 1.0);

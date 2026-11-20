@@ -101,7 +101,9 @@ impl Grid {
 
 /// Clamps a filter into the allowed parameter space.
 fn constrain(f: &mut Filter, target: &Target) {
-    f.freq = f.freq.clamp(target.cut_floor_hz(), target.high_hz);
+    let lo = target.cut_floor_hz();
+    let hi = target.high_hz.max(lo);
+    f.freq = f.freq.clamp(lo, hi);
     f.gain = f.gain.clamp(GAIN_MIN, GAIN_MAX);
     let mut q_max = if f.freq < Q_SPLIT_HZ {
         Q_MAX_LOW
@@ -111,13 +113,16 @@ fn constrain(f: &mut Filter, target: &Target) {
         Q_MAX_TREBLE
     };
     if f.gain > 0.0 {
-        q_max = q_max.min(BOOST_Q_MAX);
-        f.freq = f
-            .freq
-            .max(BOOST_LOW_FACTOR * target.low_hz)
-            .min(target.high_hz);
-        if f.freq < Q_SPLIT_HZ {
-            f.gain = f.gain.min(LOW_BOOST_MAX);
+        let boost_lo = BOOST_LOW_FACTOR * target.low_hz;
+        if boost_lo > hi {
+            // Boosts are disallowed when twice the bass limit lies above the high limit.
+            f.gain = 0.0;
+        } else {
+            q_max = q_max.min(BOOST_Q_MAX);
+            f.freq = f.freq.clamp(boost_lo, hi);
+            if f.freq < Q_SPLIT_HZ {
+                f.gain = f.gain.min(LOW_BOOST_MAX);
+            }
         }
     }
     f.q = f.q.clamp(Q_MIN, q_max);
@@ -785,5 +790,36 @@ mod tests {
             assert_eq!(*fitted, fit_problem(&p, n), "{n} filters");
         }
         assert!(!all[AUTO_MAX_FILTERS].is_empty());
+    }
+
+    #[test]
+    fn constrain_disallows_boost_when_excursion_floor_exceeds_high_limit() {
+        let target = Target {
+            reference_db: 80.0,
+            tilt_db_per_oct: 0.0,
+            low_hz: 160.0,
+            high_hz: 300.0,
+            roll_off: vec![(25.0, 60.0), (160.0, 74.0)],
+        };
+        let mut boost = Filter {
+            freq: 250.0,
+            gain: 4.0,
+            q: 1.5,
+        };
+        constrain(&mut boost, &target);
+        assert_eq!(boost.gain, 0.0);
+
+        // Even an inverted target (high < cut_floor) does not panic.
+        let tiny = Target {
+            high_hz: 10.0,
+            ..target
+        };
+        let mut cut = Filter {
+            freq: 50.0,
+            gain: -3.0,
+            q: 2.0,
+        };
+        constrain(&mut cut, &tiny);
+        assert_eq!(cut.freq, tiny.cut_floor_hz());
     }
 }

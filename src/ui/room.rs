@@ -45,8 +45,10 @@ pub fn draw(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Graphics) {
     // The plan is as wide as the room's shape needs (cells are about twice as tall as
     // wide), the words take the rest.
     let room = d.setup.room;
-    let plan_width = ((f64::from(top.height) * 2.0 * room.width / room.length) as u16 + 8)
-        .clamp(24, top.width / 2 + 4);
+    let max_plan = top.width / 2 + 4;
+    let plan_width = ((f64::from(top.height) * 2.0 * room.width / room.length) as u16)
+        .saturating_add(8)
+        .clamp(24.min(max_plan), max_plan);
     let [plan_area, advice_area] =
         Layout::horizontal([Constraint::Length(plan_width), Constraint::Min(20)]).areas(top);
     let shown_rooms = r.entries().len().min(MAX_ROOMS_SHOWN) as u16;

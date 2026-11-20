@@ -122,6 +122,11 @@ enum Command {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    if let Some(o) = cli.spl_offset
+        && !o.is_finite()
+    {
+        bail!("--spl-offset must be a finite number");
+    }
     let screen = Screen::chosen(&cli);
     match cli.command {
         Some(Command::Devices) => devices(),
@@ -526,6 +531,17 @@ fn fit(
 ) -> Result<()> {
     if filters.is_some_and(|n| !(1..=20).contains(&n)) {
         bail!("--filters must be between 1 and 20");
+    }
+    if !tilt.is_finite() {
+        bail!("--tilt must be a finite number");
+    }
+    if let Some(h) = high_limit
+        && (!h.is_finite() || !(correctsound::eq::target::CUT_FLOOR_HZ..=20_000.0).contains(&h))
+    {
+        bail!(
+            "--high-limit must be between {:.0} and 20000 Hz",
+            correctsound::eq::target::CUT_FLOOR_HZ
+        );
     }
     let session = Session::open(dir);
     let info = session.load_info()?;
