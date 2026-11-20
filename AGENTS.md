@@ -159,15 +159,19 @@ rebuild the web page (`./web/build.sh`, web/README.md) so the one on the website
 ## Releasing
 
 Users install ready-made binaries (`docs/install.sh`, the website's one-line install), so a
-release is what reaches them. **Every push that changes the website (anything in `docs/`,
-which GitHub Pages publishes at once, the web version in `docs/try/` included) is a release**,
-so the page, the web version and the downloads always describe the same app: the minor
-version for new features, the patch version for fixes only. The version changes only then,
-in the last commit before the push, never while the work is under way. Wait for CI to pass
-on the commit before pushing its tag. To release: raise `version` in Cargo.toml (and web/Cargo.toml), rebuild the web page, add the changes to "What's new"
-in `docs/index.html`, commit, then tag and push the tag (`git tag v0.3.0 && git push origin
-v0.3.0`). `.github/workflows/release.yml` builds Linux (x86_64, ARM), macOS (Apple silicon,
-Intel) and Windows binaries, with the window, and publishes them as the latest release.
+release is what reaches them. **A release is made only when the maintainer asks for one, or
+agrees to one an agent suggested** — never on an agent's own initiative. Suggest one when
+something users would want is ready, and say what it would contain. Keep in mind that a push
+changing `docs/` goes live on the website at once (GitHub Pages, the web version in
+`docs/try/` included), so the site can run ahead of the downloads until the next release.
+The minor version is for new features, the patch version for fixes only. The version
+changes only for a release, in its last commit before the push, never while the work is
+under way. To release: raise `version` in Cargo.toml (and web/Cargo.toml), rebuild the web
+page, add the changes to "Recent changes" in `docs/index.html` with "Version X.Y.Z", commit,
+push, wait for CI to pass on that commit, then tag and push the tag (`git tag v0.4.1 && git
+push origin v0.4.1`). `.github/workflows/release.yml` builds Linux (x86_64, ARM), macOS
+(Apple silicon, Intel) and Windows binaries, with the window, and publishes them as the
+latest release.
 
 Code style: each file starts with a comment saying what it is for; messages to the user
 are plain sentences; errors in user input are reported, never `panic!`ed.

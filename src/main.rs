@@ -275,9 +275,11 @@ fn wizard(options: Options, screen: Screen) -> Result<()> {
     } else {
         in_window
     };
-    let session = app.session_dir();
+    let summary = app.exit_summary();
+    // Dropping the app stops any audio and lets a change under way finish registering its
+    // undo, so the list is read after it.
+    drop(app);
     let undo = restore::pending();
-    drop(app); // stops any audio
     restore::run_all();
     if terminal {
         ratatui::restore();
@@ -287,10 +289,13 @@ fn wizard(options: Options, screen: Screen) -> Result<()> {
         println!("The window's error: {why}");
     }
     if !undo.is_empty() {
-        println!("Restored: {}", undo.join(", "));
+        println!("CorrectSound put back what it changed on your system:");
+        for what in &undo {
+            println!("  • {what}");
+        }
     }
-    if let Some(dir) = session {
-        println!("Session saved in {}", dir.display());
+    for line in summary {
+        println!("{line}");
     }
     result
 }

@@ -146,12 +146,24 @@ impl System for Linux {
     fn set_input_unity(&mut self, mic: &Device) -> Result<()> {
         let (volume, muted) = pipewire::volume(&mic.id)?;
         let id = mic.id.as_str();
-        let vol = format!("{volume:.4}");
-        crate::restore::register_command("mic-volume", &["wpctl", "set-volume", id, &vol]);
-        let mute = if muted { "1" } else { "0" };
-        crate::restore::register_command("mic-mute", &["wpctl", "set-mute", id, mute]);
-        run("wpctl", &["set-volume", id, "1.0"])?;
-        run("wpctl", &["set-mute", id, "0"])?;
+        // Only what changes is registered, so the summary on exit lists only that.
+        if (volume - 1.0).abs() >= 1e-3 {
+            let vol = format!("{volume:.4}");
+            crate::restore::register_command(
+                "mic-volume",
+                &format!("The mic's input volume in PipeWire is back to {volume:.2}."),
+                &["wpctl", "set-volume", id, &vol],
+            );
+            run("wpctl", &["set-volume", id, "1.0"])?;
+        }
+        if muted {
+            crate::restore::register_command(
+                "mic-mute",
+                "The mic is muted again, as it was.",
+                &["wpctl", "set-mute", id, "1"],
+            );
+            run("wpctl", &["set-mute", id, "0"])?;
+        }
         if let Some(card) = pipewire::Dump::load()?.alsa_card(&mic.name)
             && let Some(ctl) = alsa::capture_control(&card)?
         {
@@ -173,6 +185,10 @@ impl System for Linux {
         let current = Self::pipewire_volume(sink)?.0;
         crate::restore::register_command(
             &format!("sink-volume-{id}"),
+            &format!(
+                "The volume of {} is back to {current:.2}.",
+                sink.description
+            ),
             &["wpctl", "set-volume", id, &format!("{current:.4}")],
         );
         run(
@@ -194,8 +210,23 @@ impl System for Linux {
                     .lock()
                     .expect("bypass lock poisoned")
                     .get_or_insert(current);
-                let arg = if current { "1" } else { "2" };
-                crate::restore::register_command("easyeffects-bypass", &["easyeffects", "-b", arg]);
+                // Nothing to put back when it already was as asked.
+                if current != bypass {
+                    let (arg, what) = if current {
+                        ("1", "EasyEffects is bypassed again, as it was.")
+                    } else {
+                        (
+                            "2",
+                            "EasyEffects is on again (it was bypassed while measuring, so the \
+                             bare speakers were measured).",
+                        )
+                    };
+                    crate::restore::register_command(
+                        "easyeffects-bypass",
+                        what,
+                        &["easyeffects", "-b", arg],
+                    );
+                }
             }
             easyeffects::set_bypass(bypass)
         })

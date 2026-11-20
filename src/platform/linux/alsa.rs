@@ -60,8 +60,17 @@ fn parse(out: &str) -> Option<CaptureControl> {
 pub fn set_unity(card: &str, current: &CaptureControl) -> Result<()> {
     let value = current.value.to_string();
     let switch = if current.switch_on { "cap" } else { "nocap" };
+    let off = if current.switch_on {
+        ""
+    } else {
+        ", switched off"
+    };
     crate::restore::register_command(
         "mic-alsa",
+        &format!(
+            "The mic's ALSA capture level is back to {value}/{}{off}.",
+            current.max
+        ),
         &["amixer", "-q", "-c", card, "sset", CONTROL, &value, switch],
     );
     run(

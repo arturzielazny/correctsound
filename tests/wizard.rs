@@ -577,6 +577,13 @@ fn full_wizard_on_simulator() {
         screen.contains("Rolled back") && screen.contains("installs it again"),
         "{screen}"
     );
+    let summary = app.exit_summary().join("\n");
+    assert!(
+        summary.contains("as it was before you installed the EQ")
+            && summary.contains("Your measurement is saved in")
+            && summary.contains("correctsound review"),
+        "{summary}"
+    );
     press(&mut app, KeyCode::Char('u'));
     assert!(
         app.message
@@ -587,6 +594,14 @@ fn full_wizard_on_simulator() {
     assert!(app.save.applied.is_some(), "{:?}", app.save.error);
     assert!(sim_eq(&app));
     assert!(app.save.rolled_back.is_none());
+    // On the way out it says the EQ stays installed, and where the measurement is.
+    let summary = app.exit_summary();
+    assert!(
+        summary[0].starts_with("The EQ stays installed")
+            && summary[0].contains("backed up in")
+            && summary[1].contains(&session.display().to_string()),
+        "{summary:?}"
+    );
 
     press(&mut app, KeyCode::Enter);
     assert!(app.quit);

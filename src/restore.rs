@@ -13,6 +13,8 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 struct Undo {
     /// Identifies the setting, so a later change does not register a second undo.
     key: String,
+    /// What putting it back does, as a sentence for the user: "EasyEffects is on again".
+    what: String,
     action: Box<dyn FnOnce() + Send>,
 }
 
@@ -23,23 +25,25 @@ fn list() -> MutexGuard<'static, Vec<Undo>> {
     UNDO.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Registers `action` as the undo for `key`, unless `key` already has one. The action
-/// runs on the way out, so it must not panic; errors should be ignored.
-pub fn register(key: &str, action: impl FnOnce() + Send + 'static) {
+/// Registers `action` as the undo for `key`, unless `key` already has one; `what` says in
+/// a sentence what it puts back ("the mic's input volume is 0.42 again"), for the summary
+/// on exit. The action runs on the way out, so it must not panic; errors should be ignored.
+pub fn register(key: &str, what: &str, action: impl FnOnce() + Send + 'static) {
     let mut list = list();
     if list.iter().any(|u| u.key == key) {
         return;
     }
     list.push(Undo {
         key: key.to_owned(),
+        what: what.to_owned(),
         action: Box::new(action),
     });
 }
 
 /// Registers running `argv` (a program and its arguments) as the undo for `key`.
-pub fn register_command(key: &str, argv: &[&str]) {
+pub fn register_command(key: &str, what: &str, argv: &[&str]) {
     let argv: Vec<String> = argv.iter().map(|s| (*s).to_owned()).collect();
-    register(key, move || {
+    register(key, what, move || {
         if let Some((prog, args)) = argv.split_first() {
             let _ = Command::new(prog)
                 .args(args)
@@ -56,10 +60,10 @@ pub fn forget(key: &str) {
     list().retain(|u| u.key != key);
 }
 
-/// Keys of the pending undo steps, for display.
+/// What the pending undo steps put back, in the order they were registered, for display.
 #[must_use]
 pub fn pending() -> Vec<String> {
-    list().iter().map(|u| u.key.clone()).collect()
+    list().iter().map(|u| u.what.clone()).collect()
 }
 
 /// Runs every undo step in reverse order and clears the list.

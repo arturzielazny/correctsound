@@ -81,6 +81,39 @@ impl App {
         self.eq_host_running() && self.design.is_some()
     }
 
+    /// What to tell the user on the way out, a sentence a line: where the measurement is
+    /// saved and how to open it again, and whether the EQ stays installed. Nothing for a
+    /// session that was only reviewed and left as it was.
+    #[must_use]
+    pub fn exit_summary(&self) -> Vec<String> {
+        let mut lines = Vec::new();
+        let host = self.eq_host_name();
+        if let Some(a) = &self.save.applied {
+            let auto = match &a.autoload {
+                Some(output) => format!(", and loads it by itself for {output}"),
+                None => String::new(),
+            };
+            lines.push(format!(
+                "The EQ stays installed: {host} has the preset {} loaded{auto}. Your previous \
+                 {host} settings are backed up in {}.",
+                a.preset_name,
+                a.backup_dir.display()
+            ));
+        } else if self.save.rolled_back.is_some() {
+            lines.push(format!("{host} is as it was before you installed the EQ."));
+        }
+        if !self.reviewing()
+            && let Some(dir) = self.session_dir()
+        {
+            lines.push(format!(
+                "Your measurement is saved in {}. `correctsound review` opens it again, and \
+                 `correctsound sessions` lists all of them.",
+                dir.display()
+            ));
+        }
+        lines
+    }
+
     /// True when the platform's EQ host (EasyEffects on Linux) is running.
     #[must_use]
     pub fn eq_host_running(&self) -> bool {
