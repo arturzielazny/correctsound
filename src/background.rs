@@ -48,11 +48,16 @@ pub fn work() {
 
 #[cfg(not(target_family = "wasm"))]
 mod imp {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::num::NonZeroUsize;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::mpsc::Receiver;
+    use std::sync::{Arc, Mutex};
     use std::thread;
     use std::time::{Duration, Instant};
+
+    /// Helper threads currently owned by in-flight [`map`] calls across the process, so nested
+    /// parallel maps do not multiply thread counts beyond the machine's parallelism.
+    static SPAWNED_WORKERS: AtomicUsize = AtomicUsize::new(0);
 
     pub fn spawn(job: Box<dyn FnOnce() + Send>) {
         thread::spawn(job);
@@ -82,21 +87,93 @@ mod imp {
         job.recv().ok()
     }
 
+    struct WorkerPermit {
+        count: usize,
+    }
+
+    impl Drop for WorkerPermit {
+        fn drop(&mut self) {
+            if self.count > 0 {
+                SPAWNED_WORKERS.fetch_sub(self.count, Ordering::AcqRel);
+            }
+        }
+    }
+
+    pub(super) fn max_extra_workers() -> usize {
+        thread::available_parallelism()
+            .map(NonZeroUsize::get)
+            .unwrap_or(1)
+            .saturating_sub(1)
+    }
+
+    fn claim_workers(wanted: usize) -> WorkerPermit {
+        let limit = max_extra_workers();
+        if wanted == 0 || limit == 0 {
+            return WorkerPermit { count: 0 };
+        }
+        let mut cur = SPAWNED_WORKERS.load(Ordering::Acquire);
+        loop {
+            let free = limit.saturating_sub(cur);
+            let take = wanted.min(free);
+            if take == 0 {
+                return WorkerPermit { count: 0 };
+            }
+            match SPAWNED_WORKERS.compare_exchange_weak(
+                cur,
+                cur + take,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return WorkerPermit { count: take },
+                Err(actual) => cur = actual,
+            }
+        }
+    }
+
     pub fn map<T: Send, R: Send>(items: Vec<T>, f: impl Fn(T) -> R + Sync) -> Vec<R> {
+        let len = items.len();
+        if len <= 1 {
+            return items.into_iter().map(f).collect();
+        }
+        let permit = claim_workers(len - 1);
+        if permit.count == 0 {
+            return items.into_iter().map(f).collect();
+        }
+        let queue = Mutex::new(items.into_iter().enumerate());
+        let pop = || queue.lock().expect("background map queue poisoned").next();
         let f = &f;
+        let pop = &pop;
+        let mut results = Vec::with_capacity(len);
         thread::scope(|scope| {
-            let handles: Vec<_> = items
-                .into_iter()
-                .map(|item| scope.spawn(move || f(item)))
+            let handles: Vec<_> = (0..permit.count)
+                .map(|_| {
+                    scope.spawn(move || {
+                        let mut local = Vec::new();
+                        while let Some((idx, item)) = pop() {
+                            local.push((idx, f(item)));
+                        }
+                        local
+                    })
+                })
                 .collect();
-            handles
-                .into_iter()
-                .map(|h| h.join().expect("background work does not panic"))
-                .collect()
-        })
+            while let Some((idx, item)) = pop() {
+                results.push((idx, f(item)));
+            }
+            for handle in handles {
+                results.extend(handle.join().expect("background work does not panic"));
+            }
+        });
+        drop(permit);
+        results.sort_unstable_by_key(|(idx, _)| *idx);
+        results.into_iter().map(|(_, r)| r).collect()
     }
 
     pub fn work() {}
+
+    #[cfg(test)]
+    pub(super) fn active_workers() -> usize {
+        SPAWNED_WORKERS.load(Ordering::Acquire)
+    }
 }
 
 #[cfg(target_family = "wasm")]
@@ -188,5 +265,34 @@ mod imp {
             streams.append(&mut s);
             *s = streams;
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn map_preserves_order_for_empty_single_and_many_items() {
+        assert!(map(Vec::<i32>::new(), |x| x + 1).is_empty());
+        assert_eq!(map(vec![7], |x| x * 3), vec![21]);
+        let items: Vec<usize> = (0..64).collect();
+        let out = map(items, |i| i * i + 1);
+        assert_eq!(out, (0..64).map(|i| i * i + 1).collect::<Vec<_>>());
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
+    fn nested_map_caps_spawned_workers() {
+        let limit = imp::max_extra_workers();
+        let out = map((0..16).collect(), |outer| {
+            assert!(imp::active_workers() <= limit);
+            map((0..16).collect(), |inner| {
+                assert!(imp::active_workers() <= limit);
+                outer * 100 + inner
+            })
+        });
+        assert_eq!(out.len(), 16);
+        assert_eq!(out[15][15], 1515);
     }
 }
