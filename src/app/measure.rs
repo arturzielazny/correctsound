@@ -45,6 +45,16 @@ impl Purpose {
     }
 }
 
+/// Phase of a single sweep in flight.
+enum RunPhase {
+    /// Waiting to confirm the playback stream is routed to the expected output.
+    CheckingRouting,
+    /// Routing confirmed (or not checked); playing and capturing until playback ends.
+    Streaming,
+    /// Playback ended; keeping capture open for [`TAIL`] to cover output latency.
+    DrainingTail(Instant),
+}
+
 /// A sweep in progress.
 struct Run {
     channel: Channel,
@@ -52,8 +62,7 @@ struct Run {
     recording: Vec<f32>,
     total: usize,
     started: Instant,
-    finished_at: Option<Instant>,
-    links_ok: bool,
+    phase: RunPhase,
 }
 
 /// Result of one tick.
@@ -195,8 +204,7 @@ impl MeasureState {
             recording: Vec::with_capacity(total + SAMPLE_RATE as usize),
             total,
             started: Instant::now(),
-            finished_at: None,
-            links_ok: false,
+            phase: RunPhase::CheckingRouting,
         });
         Ok(())
     }
@@ -212,35 +220,48 @@ impl MeasureState {
             self.fail(anyhow!("{err}"));
             return Tick::Failed;
         }
-        let elapsed = run.started.elapsed();
-        if let Some(sink) = sink
-            && !run.links_ok
-            && elapsed > LINK_CHECK_AFTER
-        {
-            let route = self.purpose.route();
-            let problem = match system.check_routing(route, sink) {
-                Ok(Routing::Ok) => {
-                    run.links_ok = true;
-                    None
+        match run.phase {
+            RunPhase::CheckingRouting => {
+                if run.stream.is_finished() {
+                    run.phase = RunPhase::DrainingTail(Instant::now());
+                } else if let Some(sink) = sink {
+                    let elapsed = run.started.elapsed();
+                    if elapsed > LINK_CHECK_AFTER {
+                        let route = self.purpose.route();
+                        let problem = match system.check_routing(route, sink) {
+                            Ok(Routing::Ok) => {
+                                run.phase = RunPhase::Streaming;
+                                None
+                            }
+                            Ok(Routing::Pending) if elapsed < LINK_CHECK_GIVE_UP => None,
+                            Ok(Routing::Pending) => Some(anyhow!(
+                                "the sweep did not reach any output; nothing was measured. Try again"
+                            )),
+                            Ok(Routing::Wrong(why)) => {
+                                Some(anyhow!("{why}; nothing was measured. Try again"))
+                            }
+                            Err(e) => Some(e),
+                        };
+                        if let Some(e) = problem {
+                            self.fail(e);
+                            return Tick::Failed;
+                        }
+                    }
+                } else {
+                    run.phase = RunPhase::Streaming;
                 }
-                Ok(Routing::Pending) if elapsed < LINK_CHECK_GIVE_UP => None,
-                Ok(Routing::Pending) => Some(anyhow!(
-                    "the sweep did not reach any output; nothing was measured. Try again"
-                )),
-                Ok(Routing::Wrong(why)) => Some(anyhow!("{why}; nothing was measured. Try again")),
-                Err(e) => Some(e),
-            };
-            if let Some(e) = problem {
-                self.fail(e);
-                return Tick::Failed;
             }
-        }
-        if run.stream.is_finished() && run.finished_at.is_none() {
-            run.finished_at = Some(Instant::now());
-        }
-        if run.finished_at.is_some_and(|t| t.elapsed() >= TAIL) {
-            let run = self.run.take().expect("run checked above");
-            return Tick::Captured(run.channel, run.recording);
+            RunPhase::Streaming => {
+                if run.stream.is_finished() {
+                    run.phase = RunPhase::DrainingTail(Instant::now());
+                }
+            }
+            RunPhase::DrainingTail(since) => {
+                if since.elapsed() >= TAIL {
+                    let run = self.run.take().expect("run checked above");
+                    return Tick::Captured(run.channel, run.recording);
+                }
+            }
         }
         Tick::Running
     }
