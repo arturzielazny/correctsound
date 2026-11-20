@@ -143,20 +143,30 @@ impl System for Linux {
         // Only what changes is registered, so the summary on exit lists only that.
         if (volume - 1.0).abs() >= 1e-3 {
             let vol = format!("{volume:.4}");
-            crate::restore::register_command(
+            let registered = crate::restore::register_command(
                 "mic-volume",
                 &format!("The mic's input volume in PipeWire is back to {volume:.2}."),
                 &["wpctl", "set-volume", id, &vol],
             );
-            run("wpctl", &["set-volume", id, "1.0"])?;
+            if let Err(e) = run("wpctl", &["set-volume", id, "1.0"]) {
+                if registered {
+                    crate::restore::forget("mic-volume");
+                }
+                return Err(e);
+            }
         }
         if muted {
-            crate::restore::register_command(
+            let registered = crate::restore::register_command(
                 "mic-mute",
                 "The mic is muted again, as it was.",
                 &["wpctl", "set-mute", id, "1"],
             );
-            run("wpctl", &["set-mute", id, "0"])?;
+            if let Err(e) = run("wpctl", &["set-mute", id, "0"]) {
+                if registered {
+                    crate::restore::forget("mic-mute");
+                }
+                return Err(e);
+            }
         }
         if let Some(card) = pipewire::Dump::load()?.alsa_card(&mic.name)
             && let Some(ctl) = alsa::capture_control(&card)?
@@ -177,18 +187,25 @@ impl System for Linux {
     fn set_output_volume(&mut self, sink: &Device, volume: f64) -> Result<()> {
         let id = sink.id.as_str();
         let current = Self::pipewire_volume(sink)?.0;
-        crate::restore::register_command(
-            &format!("sink-volume-{id}"),
+        let target = volume.clamp(0.0, 1.5);
+        if (current - target).abs() < 1e-4 {
+            return Ok(());
+        }
+        let key = format!("sink-volume-{id}");
+        let registered = crate::restore::register_command(
+            &key,
             &format!(
                 "The volume of {} is back to {current:.2}.",
                 sink.description
             ),
             &["wpctl", "set-volume", id, &format!("{current:.4}")],
         );
-        run(
-            "wpctl",
-            &["set-volume", id, &format!("{:.4}", volume.clamp(0.0, 1.5))],
-        )?;
+        if let Err(e) = run("wpctl", &["set-volume", id, &format!("{target:.4}")]) {
+            if registered {
+                crate::restore::forget(&key);
+            }
+            return Err(e);
+        }
         Ok(())
     }
 
@@ -199,6 +216,7 @@ impl System for Linux {
     fn bypass_eq(&mut self, bypass: bool) -> Job {
         let original = Arc::clone(&self.original_bypass);
         Box::new(move || {
+            let mut registered = false;
             if let Some(current) = easyeffects::bypass()? {
                 original
                     .lock()
@@ -215,14 +233,20 @@ impl System for Linux {
                              bare speakers were measured).",
                         )
                     };
-                    crate::restore::register_command(
+                    registered = crate::restore::register_command(
                         "easyeffects-bypass",
                         what,
                         &["easyeffects", "-b", arg],
                     );
                 }
             }
-            easyeffects::set_bypass(bypass)
+            if let Err(e) = easyeffects::set_bypass(bypass) {
+                if registered {
+                    crate::restore::forget("easyeffects-bypass");
+                }
+                return Err(e);
+            }
+            Ok(())
         })
     }
 

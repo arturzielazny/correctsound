@@ -30,21 +30,25 @@ fn list() -> MutexGuard<'static, Vec<Undo>> {
 
 /// Registers `action` as the undo for `key`, unless `key` already has one; `what` says in
 /// a sentence what it puts back ("the mic's input volume is 0.42 again"), for the summary
-/// on exit. The action runs on the way out, so it must not panic; errors should be ignored.
-pub fn register(key: &str, what: &str, action: impl FnOnce() + Send + 'static) {
+/// on exit. Returns `true` when `key` was newly registered (so the caller can [`forget`] it
+/// if the change itself fails). The action runs on the way out, so it must not panic;
+/// errors should be ignored.
+pub fn register(key: &str, what: &str, action: impl FnOnce() + Send + 'static) -> bool {
     let mut list = list();
     if list.iter().any(|u| u.key == key) {
-        return;
+        return false;
     }
     list.push(Undo {
         key: key.to_owned(),
         what: what.to_owned(),
         action: Box::new(action),
     });
+    true
 }
 
-/// Registers running `argv` (a program and its arguments) as the undo for `key`.
-pub fn register_command(key: &str, what: &str, argv: &[&str]) {
+/// Registers running `argv` (a program and its arguments) as the undo for `key`. Returns
+/// `true` when `key` was newly registered.
+pub fn register_command(key: &str, what: &str, argv: &[&str]) -> bool {
     let argv: Vec<String> = argv.iter().map(|s| (*s).to_owned()).collect();
     register(key, what, move || {
         if let Some((prog, args)) = argv.split_first() {
@@ -55,7 +59,7 @@ pub fn register_command(key: &str, what: &str, argv: &[&str]) {
                 .stderr(Stdio::null())
                 .status();
         }
-    });
+    })
 }
 
 /// Forgets the undo for `key` (the setting was restored some other way).
@@ -109,5 +113,18 @@ mod tests {
             "second run_all returned before in-flight undo finished"
         );
         worker.join().expect("worker joined");
+    }
+
+    #[test]
+    fn register_reports_whether_key_was_added_and_forget_removes_it() {
+        let key = "test-register-reports-key";
+        forget(key);
+        assert!(register(key, "first undo", || {}));
+        assert!(!register(key, "duplicate undo", || {}));
+        assert!(pending().iter().any(|w| w == "first undo"));
+        forget(key);
+        assert!(!pending().iter().any(|w| w == "first undo"));
+        assert!(register(key, "re-added undo", || {}));
+        forget(key);
     }
 }

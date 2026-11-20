@@ -53,11 +53,15 @@ fn parse(out: &str) -> Option<CaptureControl> {
 }
 
 /// Sets the control to maximum (0 dB) and switched on, registering the undo step first.
+/// Does nothing when the control is already at maximum and switched on.
 ///
 /// # Errors
 ///
 /// Fails if amixer fails.
 pub fn set_unity(card: &str, current: &CaptureControl) -> Result<()> {
+    if current.value == current.max && current.switch_on {
+        return Ok(());
+    }
     let value = current.value.to_string();
     let switch = if current.switch_on { "cap" } else { "nocap" };
     let off = if current.switch_on {
@@ -65,7 +69,7 @@ pub fn set_unity(card: &str, current: &CaptureControl) -> Result<()> {
     } else {
         ", switched off"
     };
-    crate::restore::register_command(
+    let registered = crate::restore::register_command(
         "mic-alsa",
         &format!(
             "The mic's ALSA capture level is back to {value}/{}{off}.",
@@ -73,7 +77,7 @@ pub fn set_unity(card: &str, current: &CaptureControl) -> Result<()> {
         ),
         &["amixer", "-q", "-c", card, "sset", CONTROL, &value, switch],
     );
-    run(
+    if let Err(e) = run(
         "amixer",
         &[
             "-q",
@@ -84,7 +88,12 @@ pub fn set_unity(card: &str, current: &CaptureControl) -> Result<()> {
             &current.max.to_string(),
             "cap",
         ],
-    )?;
+    ) {
+        if registered {
+            crate::restore::forget("mic-alsa");
+        }
+        return Err(e);
+    }
     Ok(())
 }
 
@@ -111,6 +120,22 @@ mod tests {
                 max: 127,
                 switch_on: false
             })
+        );
+    }
+
+    #[test]
+    fn set_unity_is_a_noop_when_already_at_unity() {
+        let already = CaptureControl {
+            value: 127,
+            max: 127,
+            switch_on: true,
+        };
+        // Does not invoke amixer or register an undo step when already at unity.
+        assert!(set_unity("nonexistent-card-999", &already).is_ok());
+        assert!(
+            !crate::restore::pending()
+                .iter()
+                .any(|w| w.contains("ALSA capture level"))
         );
     }
 }
