@@ -286,6 +286,9 @@ impl System for Linux {
             autoload: before.autoload.or(file),
             ..before
         });
+        // EasyEffects is now active with the installed EQ; exit must not override its
+        // bypass state or undo a later rollback.
+        crate::restore::forget("easyeffects-bypass");
         Ok(applied)
     }
 
@@ -293,6 +296,9 @@ impl System for Linux {
         let Some(before) = self.before_apply.take() else {
             bail!("nothing has been installed to roll back");
         };
-        easyeffects::undo(&before, applied).inspect_err(|_| self.before_apply = Some(before))
+        let done = easyeffects::undo(&before, applied)
+            .inspect_err(|_| self.before_apply = Some(before))?;
+        crate::restore::forget("easyeffects-bypass");
+        Ok(done)
     }
 }
