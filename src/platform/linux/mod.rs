@@ -100,13 +100,7 @@ impl System for Linux {
     }
 
     fn find_input(&mut self, name: &str) -> Result<Option<Device>> {
-        let dump = pipewire::Dump::load()?;
-        Ok(Some(Device {
-            id: dump.node_id(name).unwrap_or(0).to_string(),
-            name: name.to_owned(),
-            description: name.to_owned(),
-            stereo: false,
-        }))
+        Ok(pipewire::Dump::load()?.node_by_name(name))
     }
 
     fn input_gain(&mut self, mic: &Device) -> Result<InputGain> {

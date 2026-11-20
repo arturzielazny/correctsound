@@ -144,6 +144,14 @@ impl Dump {
             .and_then(|o| u32::try_from(o.get("id")?.as_u64()?).ok())
     }
 
+    /// The node called `name`, if it exists in PipeWire.
+    #[must_use]
+    pub fn node_by_name(&self, name: &str) -> Option<Device> {
+        self.nodes()
+            .find(|o| prop(o, "node.name") == Some(name))
+            .and_then(Self::node)
+    }
+
     /// Hardware sinks (excludes EasyEffects and other virtual sinks).
     #[must_use]
     pub fn hardware_sinks(&self) -> Vec<Device> {
@@ -321,5 +329,19 @@ mod tests {
             Some("HDMI / DisplayPort 4 Output")
         );
         assert_eq!(d.route_description("easyeffects_sink"), None);
+    }
+
+    #[test]
+    fn looks_up_a_named_node_and_returns_none_when_missing() {
+        let d = Dump::parse(DUMP).expect("valid dump");
+        let found = d
+            .node_by_name("alsa_input.usb-miniDSP_Ltd._UMIK-1_1-00.mono-fallback")
+            .expect("node exists in dump");
+        assert_ne!(found.id, "0");
+        assert_eq!(
+            found.name,
+            "alsa_input.usb-miniDSP_Ltd._UMIK-1_1-00.mono-fallback"
+        );
+        assert!(d.node_by_name("no_such_pipewire_node").is_none());
     }
 }
