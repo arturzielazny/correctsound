@@ -140,7 +140,9 @@ impl Calibration {
                 continue;
             };
             if let (Ok(f), Ok(d)) = (f.parse::<f64>(), d.parse::<f64>())
+                && f.is_finite()
                 && f > 0.0
+                && d.is_finite()
             {
                 points.push((f, d));
             }
@@ -187,7 +189,7 @@ fn header_number(line: &str, key: &str) -> Option<f64> {
     let end = rest
         .find(|c: char| !(c.is_ascii_digit() || matches!(c, '-' | '+' | '.')))
         .unwrap_or(rest.len());
-    rest[..end].parse().ok()
+    rest[..end].parse::<f64>().ok().filter(|v| v.is_finite())
 }
 
 fn header_word(line: &str, key: &str) -> Option<String> {
@@ -334,6 +336,17 @@ mod tests {
     #[test]
     fn rejects_html() {
         assert!(Calibration::parse("<!doctype html>\n<p>404</p>").is_err());
+    }
+
+    #[test]
+    fn rejects_non_finite_values() {
+        let only_bad = "20.0 NaN\n100.0 inf\n1000.0 -inf\n+inf 0.0\n1e500 0.0\n";
+        assert!(Calibration::parse(only_bad).is_err());
+
+        let mixed = "20.0 -1.0\n100.0 NaN\n1000.0 inf\n1e500 0.0\n20000.0 1.0\n";
+        let cal = Calibration::parse(mixed).expect("valid finite rows remain");
+        assert_eq!(cal.len(), 2);
+        assert!(cal.db_at(500.0).is_finite());
     }
 
     #[test]
