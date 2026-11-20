@@ -9,7 +9,7 @@ use anyhow::{Result, anyhow, bail};
 use web_time::Instant;
 
 use super::keys::KeyCode;
-use super::{App, CalStatus, Step};
+use super::{App, CalDownload, CalStatus, Step};
 use crate::cal::{self, Orientation, Serial};
 use crate::platform::{Device, InputGain};
 
@@ -58,7 +58,7 @@ impl App {
 
     pub(super) fn key_setup(&mut self, code: KeyCode) {
         let n = self.devices.as_ref().map_or(0, |d| d.sinks.len());
-        let editing = self.calibration_by_serial() && self.cal_status != CalStatus::Downloading;
+        let editing = self.calibration_by_serial() && !self.cal_status.is_downloading();
         match code {
             KeyCode::Up if n > 0 => self.sink_index = (self.sink_index + n - 1) % n,
             KeyCode::Down if n > 0 => self.sink_index = (self.sink_index + 1) % n,
@@ -91,7 +91,6 @@ impl App {
         self.cal = None;
         self.cal_path = None;
         self.cal_status = CalStatus::Idle;
-        self.continue_after_download = false;
         self.load_saved_calibration();
     }
 
@@ -124,7 +123,9 @@ impl App {
     /// what is missing is said.
     fn continue_setup(&mut self) {
         if let Err(e) = self.try_continue_setup() {
-            self.continue_after_download = false;
+            if let CalStatus::Downloading(dl) = &mut self.cal_status {
+                dl.continue_after = false;
+            }
             self.set_error(&e);
         }
     }
@@ -150,10 +151,10 @@ impl App {
                 self.cal_path = Some(path);
             } else {
                 // Downloaded first; this runs again when it arrives.
-                if self.cal_status != CalStatus::Downloading {
-                    self.start_download()?;
+                match &mut self.cal_status {
+                    CalStatus::Downloading(dl) => dl.continue_after = true,
+                    _ => self.start_download(true)?,
                 }
-                self.continue_after_download = true;
                 return Ok(());
             }
         }
@@ -237,41 +238,41 @@ impl App {
         Ok(())
     }
 
-    fn start_download(&mut self) -> Result<()> {
+    fn start_download(&mut self, continue_after: bool) -> Result<()> {
         if self.serial_input.is_empty() {
             bail!("type the serial number printed on the mic first, like 700-1234");
         }
         let serial: Serial = self.serial_input.parse()?;
         let orientation = self.orientation;
-        self.cal_rx = Some(crate::background::spawn(move || {
-            cal::fetch(&serial, orientation, &cal::cache_dir())
-        }));
-        self.cal_status = CalStatus::Downloading;
+        let rx =
+            crate::background::spawn(move || cal::fetch(&serial, orientation, &cal::cache_dir()));
+        self.cal_status = CalStatus::Downloading(CalDownload { rx, continue_after });
         Ok(())
     }
 
     pub(super) fn poll_download(&mut self) {
-        let Some(rx) = &self.cal_rx else { return };
-        match rx.try_recv() {
-            Ok(Ok((c, path))) => {
+        let CalStatus::Downloading(dl) = &self.cal_status else {
+            return;
+        };
+        let outcome = match dl.rx.try_recv() {
+            Ok(res) => res,
+            Err(mpsc::TryRecvError::Empty) => return,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                Err(anyhow!("the download stopped unexpectedly"))
+            }
+        };
+        let continue_after = dl.continue_after;
+        match outcome {
+            Ok((c, path)) => {
                 self.cal = Some(c);
                 self.cal_path = Some(path);
                 self.cal_status = CalStatus::Downloaded;
-                self.cal_rx = None;
-                if std::mem::take(&mut self.continue_after_download) {
+                if continue_after {
                     self.continue_setup();
                 }
             }
-            Ok(Err(e)) => {
+            Err(e) => {
                 self.cal_status = CalStatus::Failed(format!("{e:#}"));
-                self.cal_rx = None;
-                self.continue_after_download = false;
-            }
-            Err(mpsc::TryRecvError::Empty) => {}
-            Err(mpsc::TryRecvError::Disconnected) => {
-                self.cal_status = CalStatus::Failed("the download stopped unexpectedly".into());
-                self.cal_rx = None;
-                self.continue_after_download = false;
             }
         }
     }

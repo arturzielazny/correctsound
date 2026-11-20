@@ -152,12 +152,12 @@ fn calibration(app: &App, lines: &mut Vec<Line<'_>>) {
         Span::styled(short(app.orientation), Style::default().fg(ACCENT)),
     ]));
     match (&app.cal_status, &app.cal) {
-        (CalStatus::Downloading, _) => lines.push(Line::from(warn(
+        (CalStatus::Downloading(_), _) => lines.push(Line::from(warn(
             "Calibration: downloading the file from miniDSP…",
         ))),
         (CalStatus::Failed(e), _) => lines.push(Line::from(bad(&format!("Calibration: {e}")))),
         (status, Some(c)) => {
-            let source = if *status == CalStatus::Downloaded {
+            let source = if matches!(status, CalStatus::Downloaded) {
                 "downloaded from miniDSP and saved"
             } else {
                 "saved copy"
@@ -193,13 +193,13 @@ fn what_enter_does(app: &App) -> Option<Line<'static>> {
         if !app.calibration_by_serial() {
             return None;
         }
-        match app.cal_status {
-            CalStatus::Downloading if app.continue_after_download => {
+        match &app.cal_status {
+            CalStatus::Downloading(dl) if dl.continue_after => {
                 return Some(Line::from(dim(
                     "Continuing as soon as the calibration file arrives…",
                 )));
             }
-            CalStatus::Downloading => " continues once the calibration file arrives.",
+            CalStatus::Downloading(_) => " continues once the calibration file arrives.",
             _ if app.serial_input.parse::<crate::cal::Serial>().is_err() => {
                 return None;
             }

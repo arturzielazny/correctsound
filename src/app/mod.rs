@@ -105,15 +105,39 @@ impl Step {
     }
 }
 
+/// An in-flight calibration download from miniDSP.
+pub struct CalDownload {
+    pub(super) rx: Receiver<Result<(Calibration, PathBuf)>>,
+    /// Enter was pressed before the calibration arrived: setup continues when it does.
+    pub continue_after: bool,
+}
+
+impl std::fmt::Debug for CalDownload {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CalDownload")
+            .field("continue_after", &self.continue_after)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Calibration download progress.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Default)]
 pub enum CalStatus {
     /// Nothing downloaded in this run (a saved file may be loaded).
+    #[default]
     Idle,
-    Downloading,
+    Downloading(CalDownload),
     /// Downloaded from miniDSP in this run, and saved.
     Downloaded,
     Failed(String),
+}
+
+impl CalStatus {
+    /// True while a calibration download is in flight.
+    #[must_use]
+    pub fn is_downloading(&self) -> bool {
+        matches!(self, Self::Downloading(_))
+    }
 }
 
 /// Save & apply progress.
@@ -190,9 +214,6 @@ pub struct App {
     pub cal: Option<Calibration>,
     pub cal_path: Option<PathBuf>,
     pub cal_status: CalStatus,
-    cal_rx: Option<Receiver<Result<(Calibration, PathBuf)>>>,
-    /// Enter was pressed before the calibration arrived: setup continues when it does.
-    pub continue_after_download: bool,
 
     pub mic_gain: Option<InputGain>,
     /// The EQ host being bypassed beside the screen, after setup.
@@ -342,8 +363,6 @@ impl App {
             cal: None,
             cal_path: None,
             cal_status: CalStatus::Idle,
-            cal_rx: None,
-            continue_after_download: false,
             mic_gain: None,
             eq_bypass_job: None,
             level: LevelState::new(),
