@@ -17,32 +17,53 @@ use correctsound::ui::theme::Rgb;
 /// work a changed frame does. The fastest of five runs, so a stall does not inflate it.
 pub fn yardstick() -> f64 {
     (0..5)
-        .map(|_| {
-            let t = Instant::now();
-            let mut c = Canvas::new(2400, 1200, Rgb(26, 27, 38), 15.0);
-            for k in 0..40 {
-                let y = 30.0 * k as f32;
-                c.line((0.0, y), (2400.0, y), Pen::solid(Rgb(60, 60, 80), 0.5, 1.0));
-            }
-            for k in 0..6 {
-                let points: Vec<Option<(f32, f32)>> = (0..2400)
-                    .map(|x| {
-                        let x = x as f32;
-                        Some((x, 600.0 + 300.0 * ((x / (40.0 + 9.0 * k as f32)).sin())))
-                    })
-                    .collect();
-                c.polyline(&points, Pen::solid(Rgb(255, 158, 100), 0.9, 3.0));
-            }
-            let area: Vec<(f32, f32)> = (0..=240)
-                .map(|x| (x as f32 * 10.0, 900.0 + 80.0 * (x as f32 / 7.0).sin()))
-                .chain([(2400.0, 1200.0), (0.0, 1200.0)])
-                .collect();
-            c.fill(&area, Rgb(122, 162, 247), 0.3);
-            let image = c.into_image();
-            std::hint::black_box(&image);
-            ms(t)
-        })
+        .map(|_| yardstick_once())
         .fold(f64::INFINITY, f64::min)
+}
+
+/// One run of the [`yardstick`]'s drawing, ms. Timed beside frames that run while other
+/// work goes on (the simulated room playing, sweeps analysed), it gives them a yardstick
+/// measured under the same conditions.
+pub fn yardstick_once() -> f64 {
+    let t = Instant::now();
+    let mut c = Canvas::new(2400, 1200, Rgb(26, 27, 38), 15.0);
+    for k in 0..40 {
+        let y = 30.0 * k as f32;
+        c.line((0.0, y), (2400.0, y), Pen::solid(Rgb(60, 60, 80), 0.5, 1.0));
+    }
+    for k in 0..6 {
+        let points: Vec<Option<(f32, f32)>> = (0..2400)
+            .map(|x| {
+                let x = x as f32;
+                Some((x, 600.0 + 300.0 * ((x / (40.0 + 9.0 * k as f32)).sin())))
+            })
+            .collect();
+        c.polyline(&points, Pen::solid(Rgb(255, 158, 100), 0.9, 3.0));
+    }
+    let area: Vec<(f32, f32)> = (0..=240)
+        .map(|x| (x as f32 * 10.0, 900.0 + 80.0 * (x as f32 / 7.0).sin()))
+        .chain([(2400.0, 1200.0), (0.0, 1200.0)])
+        .collect();
+    c.fill(&area, Rgb(122, 162, 247), 0.3);
+    let image = c.into_image();
+    std::hint::black_box(&image);
+    ms(t)
+}
+
+/// The median of `values` (the mean of the middle two for an even count).
+///
+/// # Panics
+///
+/// If `values` is empty.
+pub fn median(mut values: Vec<f64>) -> f64 {
+    assert!(!values.is_empty(), "the median of nothing");
+    values.sort_by(f64::total_cmp);
+    let mid = values.len() / 2;
+    if values.len().is_multiple_of(2) {
+        (values[mid - 1] + values[mid]) / 2.0
+    } else {
+        values[mid]
+    }
 }
 
 pub fn press(app: &mut App, code: KeyCode) -> f64 {

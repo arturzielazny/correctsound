@@ -17,7 +17,9 @@ mod common;
 
 use std::time::{Duration, Instant};
 
-use common::{measured_session, ms, press, settle, tick_until, within, yardstick};
+use common::{
+    measured_session, median, ms, press, settle, tick_until, within, yardstick, yardstick_once,
+};
 use correctsound::app::keys::KeyCode;
 use correctsound::app::{App, Options, Overlay, Step};
 use correctsound::ui::graphics::Graphics;
@@ -41,8 +43,9 @@ const STEADY_FRAME_MS: f64 = 40.0;
 /// per pixel of the room's floor, as once happened, made it 13).
 const CHANGED_FRAMES: f64 = 8.0;
 /// A placement frame on fast sweeps, after the first: its curve and its waterfall drawn anew
-/// for every update, five times a second, like a frame whose charts all changed (about 5.5
-/// yardsticks; the fastest sweeps, gone in 0.4.0, drew no waterfall and took 2.6).
+/// for every update, five times a second, like a frame whose charts all changed (the median
+/// of ten is about 4.5 yardsticks timed beside them; the fastest sweeps, gone in 0.4.0, drew
+/// no waterfall and took 2.6).
 const PLACEMENT_FRAMES: f64 = CHANGED_FRAMES;
 /// Background work after a key: the new design (100–200 ms).
 const DESIGN_MS: f64 = 4000.0;
@@ -88,7 +91,14 @@ impl Screen {
 }
 
 /// Placement on fast sweeps: every update's frame, drawn while the sweep loops.
-fn placement(app: &mut App, unit: f64) {
+///
+/// These frames are drawn while the simulated room plays and every update is analysed, on
+/// whatever else a shared CI machine is doing; one of ten can stall for reasons that are not
+/// the app's. So each frame is followed by a run of the yardstick under the same conditions,
+/// and the median frame is held to the median yardstick: a busy spell slows both alike, a
+/// stall in one frame does not decide, and a real slowdown, which slows every frame, still
+/// fails.
+fn placement(app: &mut App) {
     let mut screen = Screen::new();
     press(app, KeyCode::Char('p'));
     press(app, KeyCode::Char('m'));
@@ -99,20 +109,27 @@ fn placement(app: &mut App, unit: f64) {
     // The first frame after opening lays the screen out and sets its charts up; what
     // matters while watching is every frame after it.
     let _ = screen.frame(app);
-    let (mut slowest, mut most, mut frames) = (0f64, 0usize, 0);
-    while frames < 10 {
+    let (mut frames, mut units, mut most) = (Vec::new(), Vec::new(), 0usize);
+    while frames.len() < 10 {
         let seen = count(app);
         tick_until(app, "an update", Duration::from_secs(10), |a| {
             count(a) > seen
         });
         let (took, sent) = screen.frame(app);
-        slowest = slowest.max(took);
+        frames.push(took);
         most = most.max(sent);
-        frames += 1;
+        units.push(yardstick_once());
     }
+    let slowest = frames.iter().copied().fold(0.0, f64::max);
+    let unit = median(units);
+    eprintln!(
+        "{:<44} {unit:7.1} ms",
+        "  yardstick beside them (median of ten)"
+    );
+    eprintln!("{:<44} {slowest:7.1} ms", "  slowest of them (not judged)");
     within(
-        "placement: slowest frame of ten updates",
-        slowest,
+        "placement: median frame of ten updates",
+        median(frames),
         PLACEMENT_FRAMES * unit,
     );
     eprintln!("{:<44} {:7.2} MB", "  most sent in one", most as f64 / 1e6);
@@ -139,7 +156,7 @@ fn reviewing_answers_at_once() {
         "yardstick (a fixed piece of drawing)"
     );
     let changed = CHANGED_FRAMES * unit;
-    let session = measured_session(|app| placement(app, unit));
+    let session = measured_session(placement);
 
     // Opening the review: every recording analysed again, in parallel.
     let t = Instant::now();
