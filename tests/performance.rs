@@ -40,9 +40,10 @@ const STEADY_FRAME_MS: f64 = 40.0;
 /// A frame whose charts changed: drawn, compressed and encoded (2–3.5 yardsticks; a sort
 /// per pixel of the room's floor, as once happened, made it 13).
 const CHANGED_FRAMES: f64 = 8.0;
-/// A placement frame: its curve and waterfall drawn anew for every update, five times a
-/// second on fast sweeps (about 2.6 yardsticks).
-const PLACEMENT_FRAMES: f64 = 6.0;
+/// A placement frame on fast sweeps, after the first: its curve and its waterfall drawn anew
+/// for every update, five times a second, like a frame whose charts all changed (about 5.5
+/// yardsticks; the fastest sweeps, gone in 0.4.0, drew no waterfall and took 2.6).
+const PLACEMENT_FRAMES: f64 = CHANGED_FRAMES;
 /// Background work after a key: the new design (100–200 ms).
 const DESIGN_MS: f64 = 4000.0;
 /// Opening a review: every recording analysed again (about 0.5 s).
@@ -95,6 +96,9 @@ fn placement(app: &mut App, unit: f64) {
     tick_until(app, "fast sweeps", Duration::from_secs(20), |a| {
         count(a) >= 3
     });
+    // The first frame after opening lays the screen out and sets its charts up; what
+    // matters while watching is every frame after it.
+    let _ = screen.frame(app);
     let (mut slowest, mut most, mut frames) = (0f64, 0usize, 0);
     while frames < 10 {
         let seen = count(app);
