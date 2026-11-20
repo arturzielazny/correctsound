@@ -87,6 +87,14 @@ pub fn last_output_preset() -> Option<String> {
     (!name.is_empty()).then_some(name)
 }
 
+/// An autoload file written during this session, and whether a pre-existing file was
+/// backed up before CorrectSound first wrote it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutoloadBackup {
+    pub path: PathBuf,
+    pub had_original: bool,
+}
+
 /// What EasyEffects was doing before the first apply, to roll back to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Before {
@@ -96,7 +104,7 @@ pub struct Before {
     pub bypass: Option<bool>,
     /// The autoload file the apply wrote (a copy of any file it replaced is in the
     /// backup).
-    pub autoload: Option<PathBuf>,
+    pub autoload: Option<AutoloadBackup>,
 }
 
 /// Rolls EasyEffects back to `before`: the autoload file as it was, the preset it had
@@ -106,8 +114,8 @@ pub struct Before {
 ///
 /// Fails if the autoload file cannot be put back or EasyEffects rejects the preset.
 pub fn undo(before: &Before, applied: &Applied) -> Result<String> {
-    if let Some(path) = &before.autoload {
-        restore_autoload(path, &applied.backup_dir)?;
+    if let Some(autoload) = &before.autoload {
+        restore_autoload(autoload, &applied.backup_dir)?;
     }
     let loaded = match &before.preset {
         Some(name) => {
@@ -136,15 +144,19 @@ pub fn undo(before: &Before, applied: &Applied) -> Result<String> {
 }
 
 /// Puts an autoload file written by [`set_autoload`] back as it was: the copy of the one
-/// it replaced, from `backup_dir`, or no file when there was none.
-fn restore_autoload(path: &Path, backup_dir: &Path) -> Result<()> {
-    let copy = backup_dir
-        .join("autoload-output")
-        .join(path.file_name().unwrap_or_default());
-    if copy.exists() {
-        fs::copy(&copy, path).with_context(|| format!("restoring {}", path.display()))?;
-    } else if path.exists() {
-        fs::remove_file(path).with_context(|| format!("removing {}", path.display()))?;
+/// it replaced, from `backup_dir`, or no file when there was none before the first apply.
+fn restore_autoload(autoload: &AutoloadBackup, backup_dir: &Path) -> Result<()> {
+    if autoload.had_original {
+        let copy = backup_dir
+            .join("autoload-output")
+            .join(autoload.path.file_name().unwrap_or_default());
+        if copy.exists() {
+            fs::copy(&copy, &autoload.path)
+                .with_context(|| format!("restoring {}", autoload.path.display()))?;
+        }
+    } else if autoload.path.exists() {
+        fs::remove_file(&autoload.path)
+            .with_context(|| format!("removing {}", autoload.path.display()))?;
     }
     Ok(())
 }
@@ -226,23 +238,30 @@ fn autoload_path(dir: &Path, target: &AutoloadTarget) -> PathBuf {
 
 /// Makes `preset` the one EasyEffects loads for `target`, at startup and whenever that
 /// output becomes active. An autoload file it replaces is copied to `backup_dir` first
-/// (once per session). Returns the file written.
+/// (only when `existing` has not already recorded this file's pre-session state). Returns
+/// the file written and whether a pre-existing file was backed up.
 fn set_autoload(
     dir: &Path,
     target: &AutoloadTarget,
     preset: &str,
     backup_dir: &Path,
-) -> Result<PathBuf> {
+    existing: Option<&AutoloadBackup>,
+) -> Result<AutoloadBackup> {
     fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     let path = autoload_path(dir, target);
-    if path.exists() {
+    let had_original = if let Some(prev) = existing.filter(|p| p.path == path) {
+        prev.had_original
+    } else if path.exists() {
         let saved = backup_dir.join("autoload-output");
         let copy = saved.join(path.file_name().unwrap_or_default());
         if !copy.exists() {
             fs::create_dir_all(&saved)?;
             fs::copy(&path, &copy).with_context(|| format!("backing up {}", path.display()))?;
         }
-    }
+        true
+    } else {
+        false
+    };
     let json = serde_json::json!({
         "device": target.device,
         "device-description": target.description,
@@ -251,14 +270,14 @@ fn set_autoload(
     });
     fs::write(&path, serde_json::to_string_pretty(&json)?)
         .with_context(|| format!("writing {}", path.display()))?;
-    Ok(path)
+    Ok(AutoloadBackup { path, had_original })
 }
 
 /// Backs up the live settings, writes the preset, loads it and turns bypass off. With an
 /// `autoload` target the preset also becomes the one EasyEffects loads for that output, so
 /// it survives EasyEffects restarting without saving its state.
 ///
-/// Returns the autoload file written, if any, beside what was applied.
+/// Returns the autoload backup state, if any, beside what was applied.
 ///
 /// # Errors
 ///
@@ -267,7 +286,8 @@ pub fn apply(
     eq: &EqSet,
     backup_parent: &Path,
     autoload: Option<&AutoloadTarget>,
-) -> Result<(Applied, Option<PathBuf>)> {
+    existing_autoload: Option<&AutoloadBackup>,
+) -> Result<(Applied, Option<AutoloadBackup>)> {
     let backup_dir = backup_parent.join("easyeffects-backup");
     let db = easyeffects_config_dir().join("db");
     // Applying again in the same session must keep the backup of the settings from
@@ -292,7 +312,7 @@ pub fn apply(
     let (autoload, file) = match autoload {
         Some(target) => {
             let dir = easyeffects_data_dir().join("autoload/output");
-            let file = set_autoload(&dir, target, &name, &backup_dir)?;
+            let file = set_autoload(&dir, target, &name, &backup_dir, existing_autoload)?;
             (Some(target.route.clone()), Some(file))
         }
         None => (None, None),
@@ -344,37 +364,59 @@ mod tests {
             description: "HDMI 4".into(),
             route: "HDMI / DisplayPort 4 Output".into(),
         };
-        let path = set_autoload(&dir, &target, "CoSo-001-13112026", &backup).expect("written");
-        assert_eq!(
-            path.file_name().and_then(|n| n.to_str()),
-            Some("alsa_output.pci-0000_c1_00.1.HiFi__HDMI4__sink:HDMI _ DisplayPort 4 Output.json")
-        );
         let read = |p: &Path| -> serde_json::Value {
             serde_json::from_str(&fs::read_to_string(p).expect("read")).expect("json")
         };
-        assert_eq!(read(&path)["preset-name"], "CoSo-001-13112026");
-        assert_eq!(read(&path)["device-profile"], "HDMI / DisplayPort 4 Output");
-        // A second apply replaces it; the first (pre-existing) file is what the backup keeps.
-        set_autoload(&dir, &target, "CoSo-002-13112026", &backup).expect("written");
-        set_autoload(&dir, &target, "CoSo-003-13112026", &backup).expect("written");
-        assert_eq!(read(&path)["preset-name"], "CoSo-003-13112026");
+        // Pre-existing autoload file before CorrectSound first applies.
+        fs::create_dir_all(&dir).expect("autoload dir");
+        let existing_path = autoload_path(&dir, &target);
+        fs::write(&existing_path, r#"{"preset-name": "UserPreset"}"#).expect("pre-existing");
+        let first =
+            set_autoload(&dir, &target, "CoSo-001-13112026", &backup, None).expect("written");
+        assert!(first.had_original);
+        assert_eq!(
+            first.path.file_name().and_then(|n| n.to_str()),
+            Some("alsa_output.pci-0000_c1_00.1.HiFi__HDMI4__sink:HDMI _ DisplayPort 4 Output.json")
+        );
+        assert_eq!(read(&first.path)["preset-name"], "CoSo-001-13112026");
+        assert_eq!(
+            read(&first.path)["device-profile"],
+            "HDMI / DisplayPort 4 Output"
+        );
+        // Subsequent applies keep the pre-existing file as the backup.
+        let second = set_autoload(&dir, &target, "CoSo-002-13112026", &backup, Some(&first))
+            .expect("written");
+        assert!(second.had_original);
+        assert_eq!(read(&second.path)["preset-name"], "CoSo-002-13112026");
         let saved = backup
             .join("autoload-output")
-            .join(path.file_name().expect("name"));
-        assert_eq!(read(&saved)["preset-name"], "CoSo-001-13112026");
-        // Rolling back puts the file from before the first apply back.
-        restore_autoload(&path, &backup).expect("restored");
-        assert_eq!(read(&path)["preset-name"], "CoSo-001-13112026");
-        // Where there was no file before, rolling back removes the one written.
+            .join(first.path.file_name().expect("name"));
+        assert_eq!(read(&saved)["preset-name"], "UserPreset");
+        // Rolling back puts the pre-existing file back.
+        restore_autoload(&second, &backup).expect("restored");
+        assert_eq!(read(&first.path)["preset-name"], "UserPreset");
+        // Where there was no file before, even after applying twice, rolling back removes
+        // CorrectSound's file rather than backing up CoSo-004 and restoring it.
         let other = AutoloadTarget {
             device: "alsa_output.usb-speakers".into(),
             description: "USB speakers".into(),
             route: "Analog Output".into(),
         };
         let fresh = root.join("fresh-backup");
-        let path = set_autoload(&dir, &other, "CoSo-004-13112026", &fresh).expect("written");
-        restore_autoload(&path, &fresh).expect("restored");
-        assert!(!path.exists());
+        let first = set_autoload(&dir, &other, "CoSo-004-13112026", &fresh, None).expect("written");
+        assert!(!first.had_original);
+        let second =
+            set_autoload(&dir, &other, "CoSo-005-13112026", &fresh, Some(&first)).expect("written");
+        assert!(!second.had_original);
+        assert!(
+            !fresh
+                .join("autoload-output")
+                .join(first.path.file_name().expect("name"))
+                .exists(),
+            "second apply must not back up CorrectSound's own autoload file"
+        );
+        restore_autoload(&second, &fresh).expect("restored");
+        assert!(!second.path.exists());
         let _ = fs::remove_dir_all(&root);
     }
 }

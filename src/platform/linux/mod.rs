@@ -275,7 +275,12 @@ impl System for Linux {
                 autoload: None,
             },
         };
-        let (applied, file) = match easyeffects::apply(eq, backup_parent, target.as_ref()) {
+        let (applied, file) = match easyeffects::apply(
+            eq,
+            backup_parent,
+            target.as_ref(),
+            before.autoload.as_ref(),
+        ) {
             Ok(done) => done,
             Err(e) => {
                 self.before_apply = Some(before);
