@@ -120,9 +120,18 @@ fn placement(app: &mut App, unit: f64) {
     press(app, KeyCode::Esc);
 }
 
+struct TempRoot(std::path::PathBuf);
+
+impl Drop for TempRoot {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 #[test]
 fn reviewing_answers_at_once() {
     let root = std::env::temp_dir().join(format!("correctsound-perf-{}", std::process::id()));
+    let _cleanup = TempRoot(root.clone());
     correctsound::paths::set_root(root);
     let unit = yardstick();
     eprintln!(

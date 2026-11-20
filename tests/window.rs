@@ -145,9 +145,18 @@ fn placement(app: &mut App, window: &mut Window, unit: f64) {
     press(app, KeyCode::Esc);
 }
 
+struct TempRoot(std::path::PathBuf);
+
+impl Drop for TempRoot {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 #[test]
 fn the_window_draws_at_once() {
     let root = std::env::temp_dir().join(format!("correctsound-window-{}", std::process::id()));
+    let _cleanup = TempRoot(root.clone());
     correctsound::paths::set_root(root);
     let Some(mut window) = Window::new() else {
         return;

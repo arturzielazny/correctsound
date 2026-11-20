@@ -54,8 +54,9 @@ fn render(app: &App, cols: u16, rows: u16) -> String {
     out
 }
 
-fn app_with(name: &str, config: SimConfig, state: SimState) -> App {
-    let root = std::env::temp_dir().join(format!("correctsound-{name}-{}", std::process::id()));
+fn app_with(config: SimConfig, state: SimState) -> App {
+    // All tests in this binary share one process-wide test root (set_root uses OnceLock).
+    let root = std::env::temp_dir().join(format!("correctsound-scenarios-{}", std::process::id()));
     correctsound::paths::set_root(root);
     App::new(Options {
         simulate: true,
@@ -126,7 +127,7 @@ fn the_chosen_output_stays_when_the_mic_is_plugged_in_late() {
         default_output: Some(laptop.clone()),
         ..SimState::default()
     };
-    let mut app = app_with("late-mic", SimConfig::default(), state);
+    let mut app = app_with(SimConfig::default(), state);
     assert_eq!(app.sink().map(|s| s.name.clone()), Some(laptop));
     assert!(render(&app, 150, 44).contains("Plug in the UMIK-1"));
     press(&mut app, KeyCode::Down);
@@ -161,7 +162,7 @@ fn measuring_the_wrong_output_is_caught() {
         default_output: Some(laptop.clone()),
         ..SimState::default()
     };
-    let mut app = app_with("wrong-output", SimConfig::default(), state);
+    let mut app = app_with(SimConfig::default(), state);
     assert_eq!(app.sink().map(|s| s.name.clone()), Some(laptop));
     to_level_noise(&mut app);
     // The meter barely moved: far under the level the room calls for, and the level step
@@ -192,7 +193,7 @@ fn the_room_screen_finds_the_simulated_room() {
     // A room of known size and layout: 5.64 × 5.24 m, the speakers in its right-hand corner.
     let config = SimConfig::living_room();
     let truth = config.scene.clone().expect("a room").setup;
-    let mut app = app_with("room", config, SimState::default());
+    let mut app = app_with(config, SimState::default());
     to_measure_step(&mut app);
     measure_positions(&mut app, 3);
     // Each position heard the room differently: the mic really moved.

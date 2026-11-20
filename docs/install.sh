@@ -34,7 +34,7 @@ fi
 archive=correctsound-$target.tar.gz
 url=https://github.com/$repo/releases/latest/download/$archive
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
+trap 'rm -rf "$tmp"' EXIT INT TERM
 
 echo "Downloading CorrectSound for $target..."
 fetch "$url" "$tmp/$archive"
