@@ -19,6 +19,9 @@ struct Undo {
 }
 
 static UNDO: Mutex<Vec<Undo>> = Mutex::new(Vec::new());
+/// Held while undo steps are running, so a second caller (e.g. the signal watchdog) waits
+/// for in-flight restorations to finish before returning.
+static RUNNING: Mutex<()> = Mutex::new(());
 
 /// The list, recovered from poisoning: this runs from the panic hook too.
 fn list() -> MutexGuard<'static, Vec<Undo>> {
@@ -67,9 +70,44 @@ pub fn pending() -> Vec<String> {
 }
 
 /// Runs every undo step in reverse order and clears the list.
+///
+/// Concurrent calls wait until an in-flight restoration finishes, so a watchdog thread
+/// cannot exit the process while the main thread is halfway through restoring the system.
 pub fn run_all() {
+    let _running = RUNNING.lock().unwrap_or_else(PoisonError::into_inner);
     let steps = std::mem::take(&mut *list());
     for step in steps.into_iter().rev() {
         (step.action)();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn concurrent_run_all_waits_for_in_flight_undo() {
+        let (started_tx, started_rx) = mpsc::channel();
+        let finished = Arc::new(AtomicBool::new(false));
+        let finished2 = Arc::clone(&finished);
+        register("test-wait", "test step", move || {
+            let _ = started_tx.send(());
+            std::thread::sleep(Duration::from_millis(80));
+            finished2.store(true, Ordering::Release);
+        });
+        let worker = std::thread::spawn(run_all);
+        started_rx.recv().expect("undo step started");
+        // A second concurrent call must block until the first has finished its undo step.
+        run_all();
+        assert!(
+            finished.load(Ordering::Acquire),
+            "second run_all returned before in-flight undo finished"
+        );
+        worker.join().expect("worker joined");
     }
 }
