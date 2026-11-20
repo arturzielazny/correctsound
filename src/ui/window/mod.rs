@@ -112,6 +112,12 @@ impl Screen {
         self.theme.background
     }
 
+    /// True when the text grid has not been laid out for the current size/scale yet.
+    #[must_use]
+    pub fn needs_update(&self) -> bool {
+        self.grid.is_none()
+    }
+
     /// Lays the app's screen out again; true when what it shows changed.
     ///
     /// # Errors
@@ -316,9 +322,9 @@ impl Live {
         let background = self.screen.background();
         self.gpu
             .render(&scene, (self.config.width, self.config.height), background)?;
-        let texture = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(t)
-            | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
+        let (texture, suboptimal) = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(t) => (t, false),
+            wgpu::CurrentSurfaceTexture::Suboptimal(t) => (t, true),
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 self.surface.configure(&self.gpu.device, &self.config);
                 self.window.request_redraw();
@@ -341,6 +347,9 @@ impl Live {
         self.gpu.queue.submit([encoder.finish()]);
         self.window.pre_present_notify();
         self.gpu.queue.present(texture);
+        if suboptimal {
+            self.surface.configure(&self.gpu.device, &self.config);
+        }
         Ok(())
     }
 }
@@ -399,6 +408,12 @@ impl ApplicationHandler for Runner<'_> {
                 }
             }
             WindowEvent::RedrawRequested => {
+                if live.screen.needs_update()
+                    && let Err(e) = live.screen.update(self.app)
+                {
+                    self.fail(event_loop, e);
+                    return;
+                }
                 if let Err(e) = live.present() {
                     self.fail(event_loop, e);
                 }
