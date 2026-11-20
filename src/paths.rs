@@ -12,12 +12,6 @@ pub fn set_root(root: PathBuf) {
     let _ = ROOT.set(root);
 }
 
-/// True when [`set_root`] has redirected paths into a test root.
-#[must_use]
-pub fn has_root() -> bool {
-    ROOT.get().is_some()
-}
-
 /// `path` for showing: the home directory (or the test root standing in for it) as `~`.
 #[must_use]
 pub fn tilde(path: &std::path::Path) -> String {

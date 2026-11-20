@@ -14,38 +14,16 @@ use crate::platform::Applied;
 /// Installed presets are named `CoSo-<sequence>-<DDMMYYYY>`, e.g. `CoSo-007-13112026`.
 pub const PRESET_PREFIX: &str = "CoSo";
 
-const FLATPAK_APP_ID: &str = "com.github.wwmm.easyeffects";
-
-fn pick_dir(native: PathBuf, flatpak_sub: &str) -> PathBuf {
-    if native.exists() || crate::paths::has_root() {
-        return native;
-    }
-    if let Some(home) = std::env::home_dir() {
-        let flatpak = home
-            .join(".var/app")
-            .join(FLATPAK_APP_ID)
-            .join(flatpak_sub)
-            .join("easyeffects");
-        if flatpak.exists() {
-            return flatpak;
-        }
-    }
-    native
-}
-
-/// EasyEffects' configuration directory (native XDG, or Flatpak if installed that way).
+/// EasyEffects' configuration directory (`$XDG_CONFIG_HOME/easyeffects`).
 #[must_use]
 pub fn config_dir() -> PathBuf {
-    pick_dir(
-        crate::paths::xdg_config_home().join("easyeffects"),
-        "config",
-    )
+    crate::paths::xdg_config_home().join("easyeffects")
 }
 
-/// EasyEffects' data directory (presets and autoload files; native XDG or Flatpak).
+/// EasyEffects' data directory (`$XDG_DATA_HOME/easyeffects`).
 #[must_use]
 pub fn data_dir() -> PathBuf {
-    pick_dir(crate::paths::xdg_data_home().join("easyeffects"), "data")
+    crate::paths::xdg_data_home().join("easyeffects")
 }
 
 /// Runs `easyeffects` with a timeout (it talks to the running instance and exits).
