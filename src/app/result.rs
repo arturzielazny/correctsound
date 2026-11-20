@@ -24,7 +24,8 @@ impl App {
     /// design or working it out: before saving.
     pub(super) fn settle_design(&mut self) {
         if let Some(job) = self.design_job.take()
-            && let Some(design) = crate::background::wait(&job)
+            && let Some((generation, design)) = crate::background::wait(&job)
+            && generation == self.measure.generation
         {
             self.apply_design(design);
         }
@@ -48,7 +49,10 @@ impl App {
         let Some(inputs) = self.design_inputs() else {
             return;
         };
-        self.design_job = Some(crate::background::spawn(move || inputs.design()));
+        let generation = self.measure.generation;
+        self.design_job = Some(crate::background::spawn(move || {
+            (generation, inputs.design())
+        }));
     }
 
     /// Takes a finished background design, and starts the next one when the options changed
@@ -56,8 +60,11 @@ impl App {
     pub(super) fn poll_design(&mut self) {
         let Some(job) = &self.design_job else { return };
         match job.try_recv() {
-            Ok(design) => {
+            Ok((generation, design)) => {
                 self.design_job = None;
+                if generation != self.measure.generation {
+                    return;
+                }
                 let stale = design.options != self.design_options;
                 self.apply_design(design);
                 if stale {

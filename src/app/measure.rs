@@ -81,6 +81,9 @@ pub struct MeasureState {
     pub issue: Option<String>,
     /// Sink volume when the level was set.
     pub frozen_volume: Option<f64>,
+    /// Incremented whenever measurements are accepted or cleared, so derived state
+    /// (designs, room guesses) can detect stale results even when sweep counts match.
+    pub generation: u64,
 }
 
 impl std::fmt::Debug for MeasureState {
@@ -111,7 +114,35 @@ impl MeasureState {
             verify: [None, None],
             issue: None,
             frozen_volume: None,
+            generation: 0,
         }
+    }
+
+    /// True when both channels have at least one measurement and the same number of positions.
+    #[must_use]
+    pub fn have_both(&self) -> bool {
+        !self.positions[0].is_empty() && self.positions[0].len() == self.positions[1].len()
+    }
+
+    /// When one channel has fewer positions than the other (e.g. after a single-channel sweep
+    /// failure), returns the lagging channel so the next sweep can complete the pair.
+    #[must_use]
+    pub fn missing_channel(&self) -> Option<Channel> {
+        match self.positions[0].len().cmp(&self.positions[1].len()) {
+            std::cmp::Ordering::Greater => Some(Channel::Right),
+            std::cmp::Ordering::Less => Some(Channel::Left),
+            std::cmp::Ordering::Equal => None,
+        }
+    }
+
+    /// Clears all measurements and advances [`Self::generation`].
+    pub fn clear(&mut self) {
+        self.cancel();
+        self.positions.iter_mut().for_each(Vec::clear);
+        self.responses = [None, None];
+        self.verify = [None, None];
+        self.issue = None;
+        self.generation += 1;
     }
 
     /// Sweep level, dBFS.
@@ -238,6 +269,7 @@ impl MeasureState {
             Purpose::Measure => {
                 self.positions[c].push(analysis);
                 self.responses[c] = Some(responses(&self.positions[c], cal, scale, sweep_dbfs));
+                self.generation += 1;
             }
             Purpose::Verify => {
                 self.verify[c] = Some(responses(
@@ -268,7 +300,8 @@ impl App {
             }
             return;
         }
-        let have_both = self.measure.positions.iter().all(|p| !p.is_empty());
+        let have_both = self.measure.have_both();
+        let has_any = self.measure.positions.iter().any(|p| !p.is_empty());
         match code {
             KeyCode::Char('p') => self.open_placement(),
             KeyCode::Tab => self.show_next_channels(),
@@ -281,12 +314,20 @@ impl App {
                 }
                 self.start_sweeps(Purpose::Measure);
             }
-            KeyCode::Char('x') if have_both => {
+            KeyCode::Char('x') if has_any => {
                 if let Some(state) = self.sim_state() {
                     state.lock().expect("sim state lock poisoned").mic_position = 0;
                 }
-                self.measure.positions.iter_mut().for_each(Vec::clear);
-                self.measure.responses = [None, None];
+                self.measure.clear();
+                self.design = None;
+                self.design_job = None;
+                self.curiosities.clear();
+                self.room_job = None;
+                self.room.invalidate_measurement();
+                self.room_stale = false;
+                self.save.written.clear();
+                self.save.error = None;
+                self.save.verify = None;
                 self.message = Some("Measurements cleared.".into());
             }
             _ => {}
@@ -299,7 +340,10 @@ impl App {
             return;
         }
         self.measure.issue = None;
-        self.measure.queue = vec![Channel::Left, Channel::Right];
+        self.measure.queue = match (purpose, self.measure.missing_channel()) {
+            (Purpose::Measure, Some(ch)) => vec![ch],
+            _ => vec![Channel::Left, Channel::Right],
+        };
         self.measure.purpose = purpose;
         self.next_sweep();
     }
@@ -414,5 +458,89 @@ impl App {
         if let Err(e) = result {
             self.set_error(&e);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::Options;
+    use crate::app::keys::{KeyEvent, KeyModifiers};
+    use crate::dsp::roommodel::{Guess, Room, Setup};
+
+    fn synthetic_analysis() -> SweepAnalysis {
+        let sweep = Sweep::new(SweepParams::default());
+        let mut rec = vec![0.0f32; 24_000];
+        rec.extend_from_slice(&sweep.samples_f32());
+        rec.resize(rec.len() + 72_000, 0.0);
+        SweepAnalysis::analyze(&sweep, &rec, IrWindow::default()).expect("synthetic sweep")
+    }
+
+    #[test]
+    fn unbalanced_channels_retry_only_the_missing_channel() {
+        let mut m = MeasureState::new();
+        let cal = Calibration::from_points(0.0, &[(20.0, 0.0), (20_000.0, 0.0)]);
+        let scale = SplScale { offset_db: 124.0 };
+        let a = synthetic_analysis();
+
+        assert!(!m.have_both());
+        assert_eq!(m.missing_channel(), None);
+
+        // Left succeeded, right failed.
+        m.accept(Channel::Left, a.clone(), &cal, scale);
+        assert!(!m.have_both());
+        assert_eq!(m.missing_channel(), Some(Channel::Right));
+
+        // Right catches up.
+        m.accept(Channel::Right, a.clone(), &cal, scale);
+        assert!(m.have_both());
+        assert_eq!(m.missing_channel(), None);
+
+        // Second position: left succeeded, right failed -> still unbalanced.
+        m.accept(Channel::Left, a, &cal, scale);
+        assert!(!m.have_both());
+        assert_eq!(m.missing_channel(), Some(Channel::Right));
+    }
+
+    #[test]
+    fn clear_invalidates_derived_state_and_advances_generation() {
+        let mut app = App::new(Options {
+            simulate: true,
+            ..Options::default()
+        });
+        app.step = Step::Measure;
+        let cal = Calibration::from_points(0.0, &[(20.0, 0.0), (20_000.0, 0.0)]);
+        let scale = SplScale { offset_db: 124.0 };
+        let a = synthetic_analysis();
+        app.measure.accept(Channel::Left, a.clone(), &cal, scale);
+        app.measure.accept(Channel::Right, a, &cal, scale);
+        let gen_before = app.measure.generation;
+        app.redesign();
+        assert!(app.design.is_some());
+        assert!(!app.curiosities.is_empty());
+        app.room.set_guesses(
+            gen_before,
+            vec![Guess {
+                setup: Setup::typical(Room {
+                    length: 5.0,
+                    width: 4.0,
+                    height: 2.6,
+                }),
+                agreement_db: 2.0,
+                balance_error_db: None,
+            }],
+        );
+        assert!(app.room.guessed_for(gen_before));
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+
+        assert!(app.measure.positions.iter().all(Vec::is_empty));
+        assert!(app.measure.responses.iter().all(Option::is_none));
+        assert!(app.measure.generation > gen_before);
+        assert!(app.design.is_none());
+        assert!(app.curiosities.is_empty());
+        assert!(app.room.guesses.is_empty());
+        assert!(!app.room.guessed_for(gen_before));
+        assert!(!app.room.guessed_for(app.measure.generation));
     }
 }

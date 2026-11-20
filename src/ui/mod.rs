@@ -231,8 +231,10 @@ fn step_hints(app: &App) -> &'static str {
         }
         Step::Measure if app.measure.running() => "s stop",
         Step::Measure => {
-            if app.measure.positions.iter().all(|p| !p.is_empty()) {
+            if app.measure.have_both() {
                 "Enter continue   a add mic position   x clear   Tab channels   p placement   Esc back"
+            } else if app.measure.missing_channel().is_some() {
+                "Enter measure missing channel   x clear   Tab channels   p placement   Esc back"
             } else {
                 "Enter measure   p placement   Esc back   q quit"
             }

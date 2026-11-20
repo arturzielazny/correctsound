@@ -205,12 +205,13 @@ pub struct App {
 
     pub design_options: DesignOptions,
     pub design: Option<Design>,
-    /// A design being worked out in the background after a key changed the options.
-    design_job: Option<Receiver<Design>>,
+    /// A design being worked out in the background after a key changed the options, tagged
+    /// with the measurement generation it was started from.
+    design_job: Option<Receiver<(u64, Design)>>,
     /// Designs worked out so far (in the background or not).
     pub designs_run: usize,
-    /// The room guessed in the background: the measurement's sweep count and the guesses.
-    room_job: Option<Receiver<(usize, Vec<crate::dsp::roommodel::Guess>)>>,
+    /// The room guessed in the background: the measurement generation and the guesses.
+    room_job: Option<Receiver<(u64, Vec<crate::dsp::roommodel::Guess>)>>,
     /// True when keys changed the room screen since it was last worked out.
     room_stale: bool,
     /// The speaker the room screen and the decay view show (0 left, 1 right).
@@ -441,6 +442,7 @@ impl App {
             ));
             self.measure.positions[c.index()] = runs;
         }
+        self.measure.generation += 1;
         self.cal_path = cal_path;
         self.cal = Some(cal);
         self.level.ambient_spl = info.ambient_spl;

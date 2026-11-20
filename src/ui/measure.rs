@@ -9,7 +9,7 @@ use ratatui::widgets::{Paragraph, Wrap};
 use super::graphics::Graphics;
 use super::placement::placement;
 use super::plot::{self, Curve, Series};
-use super::{bad, ok, panel};
+use super::{bad, ok, panel, warn};
 use crate::app::App;
 use crate::audio::Channel;
 
@@ -39,6 +39,18 @@ pub(super) fn measure(frame: &mut Frame<'_>, area: Rect, app: &App, gfx: &mut Gr
         lines.push(Line::from(
             "Do not move the mic or touch the volume while it runs.",
         ));
+    } else if let Some(missing) = m.missing_channel() {
+        let done = missing.other();
+        lines.push(Line::from(warn(&format!(
+            "{} speaker measured ({}), waiting for the {} speaker.",
+            done.name(),
+            counts[done.index()],
+            missing.name().to_lowercase(),
+        ))));
+        lines.push(Line::from(format!(
+            "Keep the mic where it is and press Enter to measure the {} speaker, or x to clear.",
+            missing.name().to_lowercase(),
+        )));
     } else {
         lines.push(Line::from(ok(&format!(
             "Measured {} mic position{} per channel.",

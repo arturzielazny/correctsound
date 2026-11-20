@@ -248,8 +248,8 @@ pub struct RoomState {
     pub yours_fit: Vec<Option<f64>>,
     /// Rooms and layouts that explain the measurement, best first.
     pub guesses: Vec<Guess>,
-    /// How many measurements the guesses were worked out from.
-    guessed_from: usize,
+    /// Measurement generation the guesses (and `yours_fit`) were worked out from.
+    guessed_from: u64,
     pub selected: Selected,
     pub field: usize,
     /// A number being typed into the selected field.
@@ -258,6 +258,8 @@ pub struct RoomState {
     pub mode: usize,
     pub view: PlanView,
     derived: Option<Derived>,
+    /// Measurement generation `derived` was worked out from.
+    derived_from: u64,
     /// Set when one of the user's rooms changed (or was added or deleted), to be saved.
     changed: bool,
     /// The room of the user's that the next `x` deletes.
@@ -277,6 +279,7 @@ impl Default for RoomState {
             mode: 0,
             view: PlanView::Mode,
             derived: None,
+            derived_from: 0,
             changed: false,
             delete_armed: None,
         }
@@ -322,13 +325,30 @@ impl RoomState {
         };
     }
 
-    /// Works out the guesses once per set of measurements, and how well the user's rooms
+    /// Drops everything derived from the previous measurement while keeping the user's rooms.
+    pub fn invalidate_measurement(&mut self) {
+        self.guesses.clear();
+        self.guessed_from = 0;
+        self.yours_fit.fill(None);
+        self.derived = None;
+        self.derived_from = 0;
+        self.mode = 0;
+        self.delete_armed = None;
+        self.selected = if self.yours.is_empty() {
+            Selected::Guess(0)
+        } else {
+            Selected::Yours(0)
+        };
+    }
+
+    /// Works out the guesses once per measurement generation, and how well the user's rooms
     /// explain the measurement.
-    pub fn guess(&mut self, m: &Measured<'_>) {
-        if self.guessed_from != m.per_measurement.len() || self.guesses.is_empty() {
+    pub fn guess(&mut self, generation: u64, m: &Measured<'_>) {
+        if self.guessed_from != generation || self.guesses.is_empty() {
             let heard = roommodel::heard_resonances(&m.per_measurement);
             self.guesses = roommodel::guess(&heard, m.evidence(), &m.merged, m.typical_t60_s);
-            self.guessed_from = m.per_measurement.len();
+            self.guessed_from = generation;
+            self.yours_fit.fill(None);
         }
         if self.yours_fit.len() != self.yours.len() {
             self.yours_fit = vec![None; self.yours.len()];
@@ -353,17 +373,17 @@ impl RoomState {
         }
     }
 
-    /// True when the guesses are those of a measurement with `measurements` sweeps.
+    /// True when the guesses belong to measurement `generation`.
     #[must_use]
-    pub fn guessed_for(&self, measurements: usize) -> bool {
-        self.guessed_from == measurements && !self.guesses.is_empty()
+    pub fn guessed_for(&self, generation: u64) -> bool {
+        self.guessed_from == generation && !self.guesses.is_empty()
     }
 
-    /// Takes guesses worked out elsewhere (in the background) for a measurement with
-    /// `measurements` sweeps.
-    pub fn set_guesses(&mut self, measurements: usize, guesses: Vec<Guess>) {
+    /// Takes guesses worked out elsewhere (in the background) for measurement `generation`.
+    pub fn set_guesses(&mut self, generation: u64, guesses: Vec<Guess>) {
         self.guesses = guesses;
-        self.guessed_from = measurements;
+        self.guessed_from = generation;
+        self.yours_fit.fill(None);
     }
 
     /// The room shown.
@@ -497,14 +517,16 @@ impl RoomState {
         std::mem::take(&mut self.changed)
     }
 
-    /// The model's view of the current setup, worked out again only when it changed.
-    pub fn derived(&mut self, m: &Measured<'_>) -> Option<&Derived> {
+    /// The model's view of the current setup, worked out again only when it or the
+    /// measurement changed.
+    pub fn derived(&mut self, generation: u64, m: &Measured<'_>) -> Option<&Derived> {
         let setup = self.setup()?;
         if !setup.room.is_valid() {
             self.derived = None;
             return None;
         }
-        if self.derived.as_ref().is_none_or(|d| d.setup != setup) {
+        if self.derived_from != generation || self.derived.as_ref().is_none_or(|d| d.setup != setup)
+        {
             let was: Vec<[u8; 3]> = self
                 .derived
                 .as_ref()
@@ -524,6 +546,7 @@ impl RoomState {
             }
             self.mode = self.mode.min(now.len().saturating_sub(1));
             self.derived = Some(new);
+            self.derived_from = generation;
         }
         self.derived.as_ref()
     }
@@ -797,11 +820,11 @@ impl App {
             return;
         }
         let typical = self.room_reverb_s();
+        let generation = self.measure.generation;
         let Some(m) = Self::room_measured(&self.measure, typical) else {
             return;
         };
-        let measurements = m.per_measurement.len();
-        if self.room.guessed_for(measurements) {
+        if self.room.guessed_for(generation) {
             return;
         }
         let heard = roommodel::heard_resonances(&m.per_measurement);
@@ -816,7 +839,7 @@ impl App {
                 balance: &balance,
             };
             (
-                measurements,
+                generation,
                 roommodel::guess(&heard, evidence, &merged, typical),
             )
         }));
@@ -836,9 +859,13 @@ impl App {
             }
         };
         self.room_job = None;
-        if let Some((measurements, guesses)) = got {
-            self.room.set_guesses(measurements, guesses);
-            self.refresh_room();
+        if let Some((generation, guesses)) = got
+            && generation == self.measure.generation
+        {
+            self.room.set_guesses(generation, guesses);
+            if !wait {
+                self.refresh_room();
+            }
         }
     }
 
@@ -846,12 +873,12 @@ impl App {
     pub(super) fn refresh_room(&mut self) {
         if self.room_job.is_some() {
             self.collect_room_guess(true);
-            return;
         }
         let typical = self.room_reverb_s();
+        let generation = self.measure.generation;
         if let Some(m) = Self::room_measured(&self.measure, typical) {
-            self.room.guess(&m);
-            let _ = self.room.derived(&m);
+            self.room.guess(generation, &m);
+            let _ = self.room.derived(generation, &m);
         }
     }
 
