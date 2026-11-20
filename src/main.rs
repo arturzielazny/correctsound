@@ -373,6 +373,8 @@ fn app_key(key: event::KeyEvent) -> Option<keys::KeyEvent> {
 const WATCHDOG_PERIOD: Duration = Duration::from_millis(200);
 /// After a signal, how long the main loop gets to exit on its own (it prints the session).
 const SIGNAL_GRACE: Duration = Duration::from_secs(1);
+/// Maximum time the watchdog waits for an in-flight restoration before exiting anyway.
+const WATCHDOG_RESTORE_WAIT: Duration = Duration::from_secs(6);
 
 /// Ends the program, restoring the system first, when its terminal goes away or a signal
 /// is not acted on. Without it a closed terminal left the wizard spinning at full CPU with
@@ -395,7 +397,7 @@ fn spawn_watchdog(signalled: Arc<AtomicBool>, in_terminal: Arc<AtomicBool>) {
                     continue;
                 }
             }
-            restore::run_all();
+            let _ = restore::run_all_within(WATCHDOG_RESTORE_WAIT);
             if !terminal_gone && terminal {
                 ratatui::restore();
             }
