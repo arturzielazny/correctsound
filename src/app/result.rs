@@ -11,7 +11,7 @@ impl App {
     /// result screen. A background design under way is no longer wanted.
     pub(super) fn redesign(&mut self) {
         if let Some(job) = self.design_job.take() {
-            let _ = job.recv();
+            let _ = crate::background::wait(&job);
         }
         let Some(inputs) = self.design_inputs() else {
             return;
@@ -24,7 +24,7 @@ impl App {
     /// design or working it out: before saving.
     pub(super) fn settle_design(&mut self) {
         if let Some(job) = self.design_job.take()
-            && let Ok(design) = job.recv()
+            && let Some(design) = crate::background::wait(&job)
         {
             self.apply_design(design);
         }
