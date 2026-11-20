@@ -17,29 +17,46 @@ pub const PRESET_PREFIX: &str = "CoSo";
 
 /// Runs `easyeffects` with a timeout (it talks to the running instance and exits).
 fn cli(args: &[&str]) -> Result<String> {
-    let mut child = Command::new("easyeffects")
-        .args(args)
+    let mut cmd = Command::new("easyeffects");
+    cmd.args(args);
+    run_with_timeout(
+        cmd,
+        Duration::from_secs(10),
+        &format!("easyeffects {}", args.join(" ")),
+    )
+}
+
+/// Runs `cmd` while draining stdout concurrently (so large output never fills the pipe
+/// buffer and deadlocks), killing and reaping the child if it exceeds `timeout`.
+fn run_with_timeout(mut cmd: Command, timeout: Duration, label: &str) -> Result<String> {
+    let mut child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .context("running easyeffects")?;
+        .with_context(|| format!("running {label}"))?;
+    let stdout = child.stdout.take();
+    let reader = std::thread::spawn(move || {
+        let mut out = String::new();
+        if let Some(mut s) = stdout {
+            use std::io::Read;
+            let _ = s.read_to_string(&mut out);
+        }
+        out
+    });
     let start = std::time::Instant::now();
     loop {
         if let Some(status) = child.try_wait()? {
-            let mut out = String::new();
-            if let Some(mut s) = child.stdout.take() {
-                use std::io::Read;
-                s.read_to_string(&mut out)?;
-            }
+            let out = reader.join().unwrap_or_default();
             if !status.success() {
-                bail!("easyeffects {} failed", args.join(" "));
+                bail!("{label} failed");
             }
             return Ok(out);
         }
-        if start.elapsed() > Duration::from_secs(10) {
+        if start.elapsed() > timeout {
             let _ = child.kill();
-            bail!("easyeffects {} timed out", args.join(" "));
+            let _ = child.wait();
+            bail!("{label} timed out");
         }
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -418,5 +435,24 @@ mod tests {
         restore_autoload(&second, &fresh).expect("restored");
         assert!(!second.path.exists());
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn run_with_timeout_drains_large_stdout_and_enforces_timeout() {
+        // Larger than Linux's 64 KiB pipe buffer: would deadlock if stdout were read only
+        // after the child exited.
+        let mut big = Command::new("sh");
+        big.args([
+            "-c",
+            "dd if=/dev/zero bs=1024 count=128 2>/dev/null | tr '\\0' 'a'",
+        ]);
+        let out = run_with_timeout(big, Duration::from_secs(5), "big-output").expect("drained");
+        assert_eq!(out.len(), 128 * 1024);
+
+        let mut slow = Command::new("sh");
+        slow.args(["-c", "sleep 5"]);
+        let err = run_with_timeout(slow, Duration::from_millis(120), "slow-cmd")
+            .expect_err("must time out");
+        assert!(err.to_string().contains("timed out"), "{err:#}");
     }
 }
