@@ -299,6 +299,12 @@ impl LevelState {
         let Some(stream) = &self.stream else {
             return;
         };
+        if let Some(err) = stream.error() {
+            self.stream = None;
+            self.phase =
+                LevelPhase::Stopped(format!("Audio stopped: {err}. Press Space to try again."));
+            return;
+        }
         let samples = stream.drain();
         match self.phase {
             LevelPhase::Listening => {

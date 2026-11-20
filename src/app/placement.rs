@@ -397,6 +397,12 @@ impl PlacementState {
                 finished_at,
             }) => {
                 recording.extend(stream.drain());
+                if let Some(err) = stream.error() {
+                    self.run = None;
+                    self.paused = true;
+                    self.report(err);
+                    return false;
+                }
                 if stream.is_finished() && finished_at.is_none() {
                     *finished_at = Some(Instant::now());
                 }
@@ -424,6 +430,12 @@ impl PlacementState {
                 received,
                 updated_at,
             }) => {
+                if let Some(err) = stream.error() {
+                    self.run = None;
+                    self.paused = true;
+                    self.report(err);
+                    return false;
+                }
                 let looped = &self.fast;
                 let new = stream.drain();
                 *received += new.len();

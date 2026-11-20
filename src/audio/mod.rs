@@ -6,9 +6,9 @@
 pub mod scene;
 pub mod sim;
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -163,6 +163,7 @@ impl Source {
 pub struct Stream {
     pub capture: Receiver<Vec<f32>>,
     finished: Arc<AtomicBool>,
+    error: Arc<Mutex<Option<String>>>,
     stop: Option<Box<dyn FnOnce() + Send>>,
 }
 
@@ -176,14 +177,31 @@ impl Stream {
         Self {
             capture,
             finished,
+            error: Arc::new(Mutex::new(None)),
             stop: Some(stop),
         }
+    }
+
+    /// Attaches a shared slot where the backend reports asynchronous stream errors.
+    #[must_use]
+    pub fn with_error(mut self, error: Arc<Mutex<Option<String>>>) -> Self {
+        self.error = error;
+        self
     }
 
     /// True when a `Once` program has finished playing.
     #[must_use]
     pub fn is_finished(&self) -> bool {
         self.finished.load(Ordering::Acquire)
+    }
+
+    /// A problem reported by the audio backend while the stream was running.
+    #[must_use]
+    pub fn error(&self) -> Option<String> {
+        self.error
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// Drains all captured samples received so far.
@@ -221,4 +239,22 @@ pub trait AudioBackend: Send {
     ///
     /// Fails if the streams cannot be created or the mic or sink is missing.
     fn start(&mut self, source: Source, route: Route) -> Result<Stream>;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+
+    use super::*;
+
+    #[test]
+    fn stream_reports_asynchronous_backend_errors() {
+        let (_tx, rx) = mpsc::channel();
+        let finished = Arc::new(AtomicBool::new(false));
+        let slot = Arc::new(Mutex::new(None));
+        let stream = Stream::new(rx, finished, Box::new(|| {})).with_error(Arc::clone(&slot));
+        assert_eq!(stream.error(), None);
+        *slot.lock().expect("lock") = Some("playback failed".into());
+        assert_eq!(stream.error().as_deref(), Some("playback failed"));
+    }
 }

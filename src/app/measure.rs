@@ -208,6 +208,10 @@ impl MeasureState {
             return Tick::Idle;
         };
         run.recording.extend(run.stream.drain());
+        if let Some(err) = run.stream.error() {
+            self.fail(anyhow!("{err}"));
+            return Tick::Failed;
+        }
         let elapsed = run.started.elapsed();
         if let Some(sink) = sink
             && !run.links_ok
