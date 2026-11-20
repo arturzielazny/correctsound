@@ -7,9 +7,15 @@ use std::sync::OnceLock;
 
 static ROOT: OnceLock<PathBuf> = OnceLock::new();
 
-/// Redirects every app and EasyEffects path under `root` (for tests). First call wins.
+/// Redirects every app and platform path under `root` (for tests). First call wins.
 pub fn set_root(root: PathBuf) {
     let _ = ROOT.set(root);
+}
+
+/// True when [`set_root`] has redirected paths into a test root.
+#[must_use]
+pub fn has_root() -> bool {
+    ROOT.get().is_some()
 }
 
 /// `path` for showing: the home directory (or the test root standing in for it) as `~`.
@@ -36,26 +42,26 @@ fn xdg(var: &str, fallback: &str) -> PathBuf {
         .unwrap_or_else(|| home().join(fallback))
 }
 
+/// `$XDG_DATA_HOME`, falling back to `~/.local/share`.
+#[must_use]
+pub fn xdg_data_home() -> PathBuf {
+    xdg("XDG_DATA_HOME", ".local/share")
+}
+
+/// `$XDG_CONFIG_HOME`, falling back to `~/.config`.
+#[must_use]
+pub fn xdg_config_home() -> PathBuf {
+    xdg("XDG_CONFIG_HOME", ".config")
+}
+
 /// `$XDG_DATA_HOME/correctsound`.
 #[must_use]
 pub fn data_dir() -> PathBuf {
-    xdg("XDG_DATA_HOME", ".local/share").join("correctsound")
+    xdg_data_home().join("correctsound")
 }
 
 /// `$XDG_CONFIG_HOME/correctsound`.
 #[must_use]
 pub fn config_dir() -> PathBuf {
-    xdg("XDG_CONFIG_HOME", ".config").join("correctsound")
-}
-
-/// `$XDG_CONFIG_HOME/easyeffects`.
-#[must_use]
-pub fn easyeffects_config_dir() -> PathBuf {
-    xdg("XDG_CONFIG_HOME", ".config").join("easyeffects")
-}
-
-/// `$XDG_DATA_HOME/easyeffects`.
-#[must_use]
-pub fn easyeffects_data_dir() -> PathBuf {
-    xdg("XDG_DATA_HOME", ".local/share").join("easyeffects")
+    xdg_config_home().join("correctsound")
 }

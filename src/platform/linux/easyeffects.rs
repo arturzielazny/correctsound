@@ -9,16 +9,49 @@ use anyhow::{Context, Result, bail};
 
 use crate::eq::EqSet;
 use crate::eq::export::easyeffects_preset;
-use crate::paths::{easyeffects_config_dir, easyeffects_data_dir};
 use crate::platform::Applied;
 
 /// Installed presets are named `CoSo-<sequence>-<DDMMYYYY>`, e.g. `CoSo-007-13112026`.
 pub const PRESET_PREFIX: &str = "CoSo";
 
+const FLATPAK_APP_ID: &str = "com.github.wwmm.easyeffects";
+
+fn pick_dir(native: PathBuf, flatpak_sub: &str) -> PathBuf {
+    if native.exists() || crate::paths::has_root() {
+        return native;
+    }
+    if let Some(home) = std::env::home_dir() {
+        let flatpak = home
+            .join(".var/app")
+            .join(FLATPAK_APP_ID)
+            .join(flatpak_sub)
+            .join("easyeffects");
+        if flatpak.exists() {
+            return flatpak;
+        }
+    }
+    native
+}
+
+/// EasyEffects' configuration directory (native XDG, or Flatpak if installed that way).
+#[must_use]
+pub fn config_dir() -> PathBuf {
+    pick_dir(
+        crate::paths::xdg_config_home().join("easyeffects"),
+        "config",
+    )
+}
+
+/// EasyEffects' data directory (presets and autoload files; native XDG or Flatpak).
+#[must_use]
+pub fn data_dir() -> PathBuf {
+    pick_dir(crate::paths::xdg_data_home().join("easyeffects"), "data")
+}
+
 /// Runs `easyeffects` with a timeout (it talks to the running instance and exits).
 fn cli(args: &[&str]) -> Result<String> {
     let mut cmd = Command::new("easyeffects");
-    cmd.args(args);
+    cmd.args(args).env("LC_ALL", "C");
     run_with_timeout(
         cmd,
         Duration::from_secs(10),
@@ -181,7 +214,7 @@ fn restore_autoload(autoload: &AutoloadBackup, backup_dir: &Path) -> Result<()> 
 /// `outputDevice` from `easyeffectsrc`, if set.
 #[must_use]
 pub fn configured_output_device() -> Option<String> {
-    let text = fs::read_to_string(easyeffects_config_dir().join("db/easyeffectsrc")).ok()?;
+    let text = fs::read_to_string(config_dir().join("db/easyeffectsrc")).ok()?;
     let mut in_section = false;
     for line in text.lines().map(str::trim) {
         if line.starts_with('[') {
@@ -306,7 +339,7 @@ pub fn apply(
     existing_autoload: Option<&AutoloadBackup>,
 ) -> Result<(Applied, Option<AutoloadBackup>)> {
     let backup_dir = backup_parent.join("easyeffects-backup");
-    let db = easyeffects_config_dir().join("db");
+    let db = config_dir().join("db");
     // Applying again in the same session must keep the backup of the settings from
     // before the first apply, not replace it with our own preset.
     if !backup_dir.exists() {
@@ -316,7 +349,7 @@ pub fn apply(
             fs::create_dir_all(&backup_dir)?;
         }
     }
-    let dir = easyeffects_data_dir().join("output");
+    let dir = data_dir().join("output");
     fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     let (name, path) = next_preset_path(&dir, chrono::Local::now().date_naive());
     let json = serde_json::to_string_pretty(&easyeffects_preset(eq))?;
@@ -328,7 +361,7 @@ pub fn apply(
     set_bypass(false)?;
     let (autoload, file) = match autoload {
         Some(target) => {
-            let dir = easyeffects_data_dir().join("autoload/output");
+            let dir = data_dir().join("autoload/output");
             let file = set_autoload(&dir, target, &name, &backup_dir, existing_autoload)?;
             (Some(target.route.clone()), Some(file))
         }

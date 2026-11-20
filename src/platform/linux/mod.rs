@@ -27,6 +27,7 @@ pub const EASYEFFECTS_SINK: &str = "easyeffects_sink";
 pub fn run(prog: &str, args: &[&str]) -> Result<String> {
     let out = Command::new(prog)
         .args(args)
+        .env("LC_ALL", "C")
         .stdin(Stdio::null())
         .output()
         .with_context(|| format!("running {prog} (is it installed?)"))?;
