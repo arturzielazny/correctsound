@@ -302,6 +302,61 @@ fn modes_line(analyses: &[&[SweepAnalysis]; 2]) -> Option<String> {
     ))
 }
 
+/// Formats the reverberation-time summary line and returns the midrange T60 when measured.
+fn reverb_line(decay: &[(f64, f64)]) -> (String, Option<f64>) {
+    let list: Vec<String> = decay
+        .iter()
+        .map(|(f, t)| format!("{} {t:.2} s", hz(*f)))
+        .collect();
+    let mid = median(
+        decay
+            .iter()
+            .filter(|(f, _)| (500.0..=1000.0).contains(f))
+            .map(|d| d.1)
+            .collect(),
+    );
+    let verdict = match mid {
+        Some(t) if t < 0.3 => Some("dry, well damped (a studio or a very furnished room)"),
+        Some(t) if t < 0.7 => Some("typical of a living room or office (0.3–0.7 s)"),
+        Some(_) => Some("lively: hard surfaces; rugs, curtains or panels would calm it"),
+        None => None,
+    };
+    let tail = match verdict {
+        Some(v) => format!(" Midrange: {v}."),
+        None => String::new(),
+    };
+    (
+        format!(
+            "Reverberation time (time to fade by 60 dB): {}.{}",
+            list.join(", "),
+            tail
+        ),
+        mid,
+    )
+}
+
+/// Broad dips between 60 Hz and 8 kHz: `(centre_hz, depth_db)`.
+fn broad_dips(resp: &Response) -> Vec<(f64, f64)> {
+    let narrow = octave_average_db(resp, 1.0 / 3.0);
+    let wide = octave_average_db(resp, 2.0);
+    let mut dips = Vec::new();
+    let mut i = 0;
+    while i < narrow.len() {
+        let f = resp.freqs[i];
+        if (60.0..=8000.0).contains(&f) && wide[i] - narrow[i] > 5.0 {
+            let start = i;
+            while i < narrow.len() && resp.freqs[i] <= 8000.0 && wide[i] - narrow[i] > 5.0 {
+                i += 1;
+            }
+            let centre = (resp.freqs[start] * resp.freqs[i - 1]).sqrt();
+            let depth = (start..i).map(|k| wide[k] - narrow[k]).fold(0.0, f64::max);
+            dips.push((centre, depth));
+        }
+        i += 1;
+    }
+    dips
+}
+
 /// Everything the curiosities screen shows.
 #[must_use]
 pub fn insights(inp: &Inputs<'_>) -> Vec<Section> {
@@ -421,29 +476,8 @@ pub fn insights(inp: &Inputs<'_>) -> Vec<Section> {
         })
         .collect();
     if !decay.is_empty() {
-        let list: Vec<String> = decay
-            .iter()
-            .map(|(f, t)| format!("{} {t:.2} s", hz(*f)))
-            .collect();
-        let mid = median(
-            decay
-                .iter()
-                .filter(|(f, _)| (500.0..=1000.0).contains(f))
-                .map(|d| d.1)
-                .collect(),
-        );
-        let verdict = match mid {
-            Some(t) if t < 0.3 => "dry, well damped (a studio or a very furnished room)",
-            Some(t) if t < 0.7 => "typical of a living room or office (0.3–0.7 s)",
-            Some(_) => "lively: hard surfaces; rugs, curtains or panels would calm it",
-            None => "",
-        };
-        room.push(format!(
-            "Reverberation time (time to fade by 60 dB): {}. {}{}.",
-            list.join(", "),
-            if verdict.is_empty() { "" } else { "Midrange: " },
-            verdict
-        ));
+        let (line, mid) = reverb_line(&decay);
+        room.push(line);
         if dims.len() == 3
             && let Some(t) = mid
         {
@@ -646,28 +680,15 @@ pub fn insights(inp: &Inputs<'_>) -> Vec<Section> {
     }
     // Broad dips: the octave-averaged response well below its two-octave surroundings.
     for (name, resp) in [("left", &l.fit), ("right", &r.fit)] {
-        let narrow = octave_average_db(resp, 1.0 / 3.0);
-        let wide = octave_average_db(resp, 2.0);
-        let mut i = 0;
-        while i < narrow.len() {
-            let f = resp.freqs[i];
-            if (60.0..=8000.0).contains(&f) && wide[i] - narrow[i] > 5.0 {
-                let start = i;
-                while i < narrow.len() && wide[i] - narrow[i] > 5.0 {
-                    i += 1;
-                }
-                let centre = (resp.freqs[start] * resp.freqs[i - 1]).sqrt();
-                let depth = (start..i).map(|k| wide[k] - narrow[k]).fold(0.0, f64::max);
-                let quarter = SPEED_OF_SOUND / (4.0 * centre);
-                unusual.push(format!(
-                    "Broad dip around {} ({name}, −{depth:.0} dB): typical of a reflection from a \
-                     surface about {:.0} cm from the speaker (wall behind it, desk) cancelling the \
-                     direct sound at a quarter wavelength.",
-                    hz(centre),
-                    quarter * 100.0
-                ));
-            }
-            i += 1;
+        for (centre, depth) in broad_dips(resp) {
+            let quarter = SPEED_OF_SOUND / (4.0 * centre);
+            unusual.push(format!(
+                "Broad dip around {} ({name}, −{depth:.0} dB): typical of a reflection from a \
+                 surface about {:.0} cm from the speaker (wall behind it, desk) cancelling the \
+                 direct sound at a quarter wavelength.",
+                hz(centre),
+                quarter * 100.0
+            ));
         }
     }
     if unusual.is_empty() {
@@ -710,5 +731,33 @@ mod tests {
         let found: Vec<f64> = dims.iter().map(|d| d.metres).collect();
         assert!(found.iter().any(|m| (m - 4.2).abs() < 0.06), "{found:?}");
         assert!(found.iter().any(|m| (m - 3.1).abs() < 0.06), "{found:?}");
+    }
+
+    #[test]
+    fn reverb_line_omits_stray_period_without_midrange() {
+        let (line, mid) = reverb_line(&[(125.0, 0.5), (250.0, 0.45)]);
+        assert!(mid.is_none());
+        assert!(!line.contains(". ."), "{line}");
+        assert!(line.ends_with("250 Hz 0.45 s."), "{line}");
+
+        let (with_mid, mid) = reverb_line(&[(500.0, 0.4), (1000.0, 0.4)]);
+        assert!(mid.is_some());
+        assert!(with_mid.contains("Midrange:"), "{with_mid}");
+    }
+
+    #[test]
+    fn broad_dips_stay_bounded_at_8_khz() {
+        let freqs = crate::dsp::spectrum::grid();
+        // Steep tweeter roll-off starting at 7 kHz and continuing to 20 kHz.
+        let db: Vec<f64> = freqs
+            .iter()
+            .map(|&f| if f > 7000.0 { 75.0 - 20.0 } else { 75.0 })
+            .collect();
+        let dips = broad_dips(&Response { freqs, db });
+        assert!(!dips.is_empty());
+        assert!(
+            dips.iter().all(|&(c, _)| c <= 8000.0),
+            "dip centre must not drift past 8 kHz: {dips:?}"
+        );
     }
 }
