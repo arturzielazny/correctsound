@@ -3,7 +3,7 @@
 use crate::files as fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::audio::Channel;
@@ -202,7 +202,92 @@ pub fn read_wav(path: &Path) -> Result<Vec<f32>> {
     let bytes = fs::read(path).with_context(|| format!("opening {}", path.display()))?;
     let mut r = hound::WavReader::new(std::io::Cursor::new(bytes))
         .with_context(|| format!("reading {}", path.display()))?;
+    let spec = r.spec();
+    if spec.channels != 1 {
+        bail!(
+            "{} has {} channels; expected a mono recording",
+            path.display(),
+            spec.channels
+        );
+    }
+    if spec.sample_rate != SAMPLE_RATE {
+        bail!(
+            "{} is at {} Hz; expected {SAMPLE_RATE} Hz",
+            path.display(),
+            spec.sample_rate
+        );
+    }
+    if spec.sample_format != hound::SampleFormat::Float {
+        bail!("{} is not a 32-bit float WAV recording", path.display());
+    }
     r.samples::<f32>()
         .collect::<Result<Vec<f32>, _>>()
         .with_context(|| format!("reading {}", path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write_custom_wav(path: &Path, spec: hound::WavSpec) {
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        let mut w = hound::WavWriter::new(&mut bytes, spec).expect("wav writer");
+        for _ in 0..spec.channels {
+            match spec.sample_format {
+                hound::SampleFormat::Float => w.write_sample(0.25f32).expect("write f32"),
+                hound::SampleFormat::Int => w.write_sample(100i16).expect("write i16"),
+            }
+        }
+        w.finalize().expect("finalize");
+        fs::write(path, bytes.into_inner()).expect("write file");
+    }
+
+    #[test]
+    fn read_wav_validates_channels_rate_and_format() {
+        let dir = std::env::temp_dir().join(format!("correctsound-wav-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("temp dir");
+
+        let ok_path = dir.join("ok.wav");
+        write_wav(&ok_path, &[0.1, -0.2, 0.3]).expect("write");
+        assert_eq!(read_wav(&ok_path).expect("read"), vec![0.1, -0.2, 0.3]);
+
+        let stereo = dir.join("stereo.wav");
+        write_custom_wav(
+            &stereo,
+            hound::WavSpec {
+                channels: 2,
+                sample_rate: SAMPLE_RATE,
+                bits_per_sample: 32,
+                sample_format: hound::SampleFormat::Float,
+            },
+        );
+        assert!(read_wav(&stereo).is_err());
+
+        let wrong_rate = dir.join("rate.wav");
+        write_custom_wav(
+            &wrong_rate,
+            hound::WavSpec {
+                channels: 1,
+                sample_rate: 44_100,
+                bits_per_sample: 32,
+                sample_format: hound::SampleFormat::Float,
+            },
+        );
+        assert!(read_wav(&wrong_rate).is_err());
+
+        let pcm = dir.join("pcm.wav");
+        write_custom_wav(
+            &pcm,
+            hound::WavSpec {
+                channels: 1,
+                sample_rate: SAMPLE_RATE,
+                bits_per_sample: 16,
+                sample_format: hound::SampleFormat::Int,
+            },
+        );
+        assert!(read_wav(&pcm).is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
