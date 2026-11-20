@@ -54,13 +54,24 @@ const SYMBOLS: &str = "✔✘✓›•…·↑↓←→±×≈≤≥°▸▶┃"
 /// A fallback font found for a symbol: its file and contents, or `None` when no font has it.
 type Found = (char, Option<(PathBuf, Vec<u8>)>);
 
+/// Lookup state for a symbol missing from the primary monospace faces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Fallback {
+    /// Requested from the background fontconfig thread; waiting for its answer.
+    Pending,
+    /// No installed font has a glyph for this symbol.
+    Missing,
+    /// Drawn with `faces[index]`.
+    Face(usize),
+}
+
 /// The monospace font, its bold, and fallbacks found per missing symbol.
 pub struct Fonts {
     /// Regular first, bold second (the regular again where there is no bold), then the
     /// fallbacks in the order they were found.
     faces: Vec<Face>,
-    /// Which face draws a symbol the first two lack (`None`: no font has it).
-    fallback: HashMap<char, Option<usize>>,
+    /// Lookup state for symbols the first two faces lack.
+    fallback: HashMap<char, Fallback>,
     /// The fallback faces' files, so a font that has several symbols is loaded once.
     files: HashMap<PathBuf, usize>,
     /// Symbols being looked for: asked of a thread, as fontconfig takes milliseconds, which
@@ -121,8 +132,12 @@ impl Fonts {
                 };
                 (self.faces[index].glyphs.glyph_id(c).0 != 0).then_some(index)
             });
-            any |= index.is_some();
-            self.fallback.insert(c, index);
+            let entry = match index {
+                Some(i) => Fallback::Face(i),
+                None => Fallback::Missing,
+            };
+            any |= matches!(entry, Fallback::Face(_));
+            self.fallback.insert(c, entry);
         }
         any
     }
@@ -149,12 +164,12 @@ impl Fonts {
                 return Some((face, id));
             }
         }
-        match self.fallback.get(&c) {
-            Some(Some(index)) => Some((*index, self.faces[*index].glyphs.glyph_id(c))),
-            Some(None) => None,
+        match self.fallback.get(&c).copied() {
+            Some(Fallback::Face(index)) => Some((index, self.faces[index].glyphs.glyph_id(c))),
+            Some(Fallback::Pending | Fallback::Missing) => None,
             None => {
                 // Asked once; drawn when the answer is in (see [`Self::collect`]).
-                self.fallback.insert(c, None);
+                self.fallback.insert(c, Fallback::Pending);
                 let _ = self.ask.send(c);
                 None
             }
