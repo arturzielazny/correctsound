@@ -10,9 +10,8 @@ browser first, against a simulated room: <https://arturzielazny.github.io/correc
 
 ![The result screen: measured, target and predicted response above the equalizer's curve](docs/img/6-result.png)
 
-> Written end to end by an AI coding agent (Claude), with one person testing it on real
-> speakers. It is meant to be taken apart: give it to your own AI agent and make it fit your
-> setup (see [Make it yours](#make-it-yours)).
+> Made to be taken apart: give it to your own AI coding agent and make it fit your setup
+> (see [Make it yours](#make-it-yours)).
 
 ## Install and run
 

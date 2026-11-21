@@ -1,7 +1,7 @@
 # Notes for AI coding agents (and the people driving them)
 
 CorrectSound measures speakers with a measurement mic and designs room-correction EQ. It
-was written by an AI agent and is meant to be extended by others. Read this file before
+is meant to be extended by others. Read this file before
 changing anything, then README.md, CONTRIBUTING.md and IDEAS.md.
 
 ## The one rule for ports: extend, don't rewrite

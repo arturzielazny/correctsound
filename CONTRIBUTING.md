@@ -1,9 +1,10 @@
 # Contributing
 
-CorrectSound was written by an AI coding agent, with one person testing it on real speakers.
-The quickest way to adapt it is the same: clone it, open your own agent (Claude Code, Codex,
-Cursor, Aider, whatever you like) in the repository, and describe your setup. This page has
-prompts that work as a starting point. Change the details to match your hardware.
+The quickest way to adapt CorrectSound is to clone it, open your own AI coding agent (Claude
+Code, Codex, Cursor, Aider, whatever you like) in the repository, and describe your setup. The
+code is laid out for that: AGENTS.md has the rules, each file says what it is for, and a
+simulated room lets the agent test without making a sound. This page has prompts that work as
+a starting point. Change the details to match your hardware.
 
 Then send a pull request. Someone else has your setup too.
 
@@ -135,6 +136,6 @@ how you would test it on the simulator. Wait for my go-ahead before writing code
 - Say which hardware you tested on, or that you only tested on the simulator.
 - Never commit personal data: calibration files of real mics, `pw-dump` output (it contains
   host and user names), recordings of your room.
-- Mentioning that an AI agent wrote the code is welcome, not a problem.
+- Pull requests made with an AI agent are welcome.
 
 By contributing you agree that your contribution is licensed under the [MIT licence](LICENSE).
